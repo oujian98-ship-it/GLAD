@@ -139,7 +139,7 @@ class StrategyATrainer:
                     num_classes: int, feature_dim: int, loss_weights: Dict[str, float],
                     train_class_counts: torch.Tensor):
         
-        # [Warmup] 前50个epoch冻结Encoder，防止扩散模型崩溃
+        # [Warmup] 前100个epoch冻结Encoder，防止扩散模型崩溃
         if epoch < 100:
             encoder.eval()
             for param in encoder.parameters(): param.requires_grad = False
