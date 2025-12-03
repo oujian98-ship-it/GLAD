@@ -93,24 +93,6 @@ class WCDASLoss(nn.Module):
         else:
             logit = 250 * logit
             
-        # [修复] Logit Adjustment (LA) - 让 WCDAS 真正具备长尾感知能力
-        # 训练阶段：对 Logit 进行调整，迫使模型对尾部类别学习出更大的 Margin
-        # 公式: logit_adj = logit + tau * log(p_y)
-        if self.training and sample_per_class is not None:
-            # 计算先验概率 p_y
-            total_samples = sample_per_class.sum()
-            prior = (sample_per_class + 1e-6) / (total_samples + 1e-6)
-            
-            # 确保 prior 在正确的设备上
-            if prior.device != logit.device:
-                prior = prior.to(logit.device)
-            
-            # Logit Adjustment (tau=1.0)
-            log_prior = torch.log(prior).unsqueeze(0)
-            tau =1.75    #原来为1.0
-            # 应用调整
-            logit = logit + tau * log_prior #实验效果不好，可以删除这个tau
-        
         # 计算损失
         l = self.loss(logit, target, sample_per_class)
         

@@ -60,9 +60,9 @@ parser.add_argument('--use_radius_constraint', default=True, type=bool, help='wh
 parser.add_argument('--target_radius', default=1.0, type=float, help='default target radius for equal radius constraint (used for classes with no samples)')
 
 # WCDAS参数
-parser.add_argument('--use_wcdas', default=True, type=bool, help='whether to use WCDAS for accuracy calculation') #WCDAS是否参与准确率计算，false时使用CE
+parser.add_argument('--use_wcdas', default=False, type=bool, help='whether to use WCDAS for accuracy calculation') #WCDAS是否参与准确率计算，false时使用CE
 parser.add_argument('--wcdas_gamma', default=0, type=float, help='initial gamma parameter for WCDAS')
-parser.add_argument('--wcdas_traiFalsenable_scale', default=True, type=bool, help='whether the scale parameter in WCDAS is trainable')
+parser.add_argument('--wcdas_traiFalsenable_scale', default=False, type=bool, help='whether the scale parameter in WCDAS is trainable')
 
 
 def main():

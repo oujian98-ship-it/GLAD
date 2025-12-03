@@ -44,7 +44,7 @@ class TrainingConfig:
         # WCDAS相关参数
         self.use_wcdas = getattr(args, 'use_wcdas', False)  # 是否使用WCDAS损失函数
         self.wcdas_gamma = getattr(args, 'wcdas_gamma', -1)  # WCDAS的初始gamma参数
-        self.wcdas_trainable_scale = getattr(args, 'wcdas_trainable_scale', True)  # WCDAS的缩放参数是否可训练
+        self.wcdas_trainable_scale = getattr(args, 'wcdas_traiFalsenable_scale', False)  # WCDAS的缩放参数是否可训练
         
         # 数值稳定性参数 - 防止训练过程中的数值问题
         self.max_loss_weight = 5.0              

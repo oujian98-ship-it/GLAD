@@ -38,7 +38,29 @@ def mmf_acc_cal(logits, label: List[int], class_num_list: List[int], method: str
     # many medium few - shot accuracy calculation
     correct = np.zeros(3)
     total = np.zeros(3) + 1e-6
-    mmf_id = list(map(get_mmf_idx, list(class_num_list)))
+    
+    # 动态确定阈值
+    min_samples = min(class_num_list)
+    if min_samples >= 500: # CIFAR-10 IF=0.1 (Min 500)
+        thr_many = 2500
+        thr_medium = 1000
+    elif min_samples >= 50: # CIFAR-10 IF=0.01 (Min 50)
+        thr_many = 100
+        thr_medium = 60
+    else: # CIFAR-100 IF=0.01 (Min 5)
+        thr_many = 100
+        thr_medium = 20
+        
+    # 生成 MMF 索引
+    mmf_id = []
+    for num in class_num_list:
+        if num < thr_medium:
+            mmf_id.append(2) # Few
+        elif num < thr_many:
+            mmf_id.append(1) # Medium
+        else:
+            mmf_id.append(0) # Many
+            
     if method == 'top1':
         label_pred = np.argsort(logits, -1).T[-1]
         for i, j in zip(label_pred, label):

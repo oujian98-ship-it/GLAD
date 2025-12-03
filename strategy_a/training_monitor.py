@@ -106,7 +106,7 @@ class TrainingMonitor:
         # 输出分隔线
         print(f"Epoch {epoch} Validation Results")
         # 主方法结果
-        print(f"[{method_name} Results]")
+        print(f"{method_name} Results:")
         print(f"  Test Loss:       {test_loss:.4f}")
         print(f"  Accuracy:        {100 * accuracy:.2f}%")
         print(f"  MMF Acc:         {mmf_acc}")
@@ -114,11 +114,10 @@ class TrainingMonitor:
         # Label Shift补偿结果
         # 注意：label_shift_acc 已经是百分比形式（由acc_cal返回），不需要再乘100
         improvement = label_shift_acc - (accuracy * 100)  # 将accuracy转为百分比后计算改进
-        print(f"\n[{method_name} + Label Shift Results]")
+        print(f"{method_name} + Label Shift Results:")
         print(f"  Accuracy:        {label_shift_acc:.2f}% ")
         print(f"  MMF Acc:         {mmf_acc_pc}")
         
-        print(f"{'='*70}\n")
         
         # 记录到日志文件
         logging.info(f"Epoch {epoch} - Method: {method_name}")
@@ -131,7 +130,7 @@ class TrainingMonitor:
         # 更新最佳准确率
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
-            print(f"🎯 New best {method_name} accuracy: {100 * accuracy:.2f}%\n")
+            print(f" New best {method_name} accuracy: {100 * accuracy:.2f}%\n")
             logging.info(f"New best {method_name} accuracy: {100 * accuracy:.2f}%")
     
 
@@ -188,7 +187,6 @@ class TrainingMonitor:
             # 输出分隔线
             print(f"\n{'='*70}")
             print(f"Training Complete - Final Results")
-            print(f"{'='*70}")
             
             # 输出最佳模型信息
             print(f"\n[Best {method_name} Model]")
