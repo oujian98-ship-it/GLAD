@@ -29,7 +29,7 @@ parser.add_argument('--config', default="./config/cifar10/cifar10_LSC_Mixup.txt"
 
 parser.add_argument('--epoch', default=400, type=int, help='epoch number to train')
 parser.add_argument('--dataset', default="CIFAR10", type=str, help='dataset name it may be CIFAR10, CIFAR100 or ImageNet')
-parser.add_argument('--imb_factor', default=0.01, type=float, help='long-tailed imbalance factor')
+parser.add_argument('--imb_factor', default=0.1, type=float, help='long-tailed imbalance factor')
 parser.add_argument('--diffusion_epoch', default=201, type=int, help='diffusion epoch to train')
 parser.add_argument('--model_fixed', default='./pretrained_models/resnet32_cifar10_lt001.checkpoint', type=str, help='the encoder model path')
 parser.add_argument('--feature_ratio', default=0.20, type=float, help='The ratio of generating feature')

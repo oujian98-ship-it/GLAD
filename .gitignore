@@ -1,10 +1,10 @@
 *.png
 *.jpg
 data/
-dataset/
 logs/
 __pycache__/
 *.pth
 *.pt
 *.checkpoint
 *.txt
+DATASET/
