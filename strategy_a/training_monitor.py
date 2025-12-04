@@ -116,7 +116,7 @@ class TrainingMonitor:
         improvement = label_shift_acc - (accuracy * 100)  # 将accuracy转为百分比后计算改进
         print(f"{method_name} + Label Shift Results:")
         print(f"  Accuracy:        {label_shift_acc:.2f}% ")
-        print(f"  MMF Acc:         {mmf_acc_pc}")
+        print(f"  MMF Acc:         {mmf_acc_pc}\n")
         
         
         # 记录到日志文件
@@ -189,7 +189,7 @@ class TrainingMonitor:
             print(f"Training Complete - Final Results")
             
             # 输出最佳模型信息
-            print(f"\n[Best {method_name} Model]")
+            print(f"Best {method_name} Model:")
             print(f"  Accuracy:        {100 * best_accuracy:.2f}%")
             print(f"  MMF Acc:         {best_mmf_acc}")
             
@@ -197,7 +197,6 @@ class TrainingMonitor:
             print(f"  Accuracy:        {best_label_shift_only:.2f}%")
             print(f"  MMF Acc:         {best_mmf_acc_pc_best}")
             
-            print(f"{'='*70}\n")
             
             # 记录到日志文件
             logging.info(f"Training Complete - Method: {method_name}")

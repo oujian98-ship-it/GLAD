@@ -140,7 +140,7 @@ class StrategyATrainer:
                     train_class_counts: torch.Tensor):
         
         # [Warmup] 前100个epoch冻结Encoder，防止扩散模型崩溃
-        if epoch < 100:
+        if epoch < 400:
             encoder.eval()
             for param in encoder.parameters(): param.requires_grad = False
         else:
@@ -157,7 +157,7 @@ class StrategyATrainer:
             inputs, labels = inputs.to(self.device), labels.to(self.device)
             
             # Forward
-            if epoch < 100:
+            if epoch < 400:
                 with torch.no_grad():
                     real_features = encoder.forward_no_fc(inputs)
             else:
@@ -220,7 +220,8 @@ class StrategyATrainer:
             real_loss = self.loss_calculator.compute_real_loss(classifier, real_features, labels)
         
         # [核心 2] 装备效果 (LDMLR 更新 & 几何约束)
-        self._update_stats_ema(real_features, labels, class_prototypes, target_radii, num_classes)
+        # [修复] 移除此处的冗余更新，EMA 更新已由 _train_epoch 在 Epoch >= 50 时统一控制
+        # self._update_stats_ema(real_features, labels, class_prototypes, target_radii, num_classes)
         
         diffusion_loss = self.loss_calculator.compute_diffusion_loss(
             diffusion_model, real_features, labels, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod

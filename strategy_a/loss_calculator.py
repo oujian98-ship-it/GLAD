@@ -276,63 +276,63 @@ class LossCalculator:
                               sqrt_alphas_cumprod: torch.Tensor, 
                               sqrt_one_minus_alphas_cumprod: torch.Tensor) -> torch.Tensor:
         """
-        计算扩散损失
+        计算扩散损失 (修复版)
+        
+        修复内容:
+        1. 移除外部加噪逻辑，直接传入纯净特征
+        2. 统一在 _manual_diffusion_loss 内部处理加噪
         """
-        batch_size = real_features.size(0)
-        device = real_features.device
+        # [修复] 直接传入纯净的 real_features
+        # 之前在此处加噪导致后续 _manual_diffusion_loss 重复加噪
         
-        # 前向加噪过程
-        t = torch.randint(0, self.config.diffusion_steps, (batch_size,), device=device)
-        noise = torch.randn_like(real_features)
-        real_features_detached = real_features.detach()
+        # 调整特征形状，确保是3D (batch_size, 1, feature_dim)
+        real_features_reshaped = real_features.unsqueeze(1)
         
-        noisy_features = sqrt_alphas_cumprod[t].view(-1, 1) * real_features_detached + \
-                         sqrt_one_minus_alphas_cumprod[t].view(-1, 1) * noise
-        
-        # 调整特征形状
-        noisy_features_reshaped = noisy_features.unsqueeze(1)
-        
-        # 手动实现扩散损失计算
-        return self._manual_diffusion_loss(diffusion_model, noisy_features_reshaped, t, labels)
+        return self._manual_diffusion_loss(diffusion_model, real_features_reshaped, None, labels)
     
     def _manual_diffusion_loss(self, diffusion_model: nn.Module, 
-                              x_noisy: torch.Tensor, t: torch.Tensor, 
+                              x_start: torch.Tensor, t: torch.Tensor, 
                               labels: torch.Tensor) -> torch.Tensor:
         """
-        手动实现扩散损失计算
+        手动实现扩散损失计算 (修复版)
+        
+        修复内容:
+        1. 移除归一化逻辑，确保训练和推理分布一致
+        2. 统一在此处生成 t 和 noise
+        3. 只加一次噪
         """
-        b, c, n = x_noisy.shape
-        device = x_noisy.device
+        b, c, n = x_start.shape
+        device = x_start.device
         
-        # 归一化
-        with torch.no_grad():
-            features_mean = x_noisy.mean(dim=[0, 1, 2], keepdim=True)
-            features_std = x_noisy.std(dim=[0, 1, 2], keepdim=True)
-            features_std = torch.clamp(features_std, min=1e-4, max=1e4)
+        # [修复1] 移除了归一化代码块
         
-        normalized_features = (x_noisy - features_mean) / (features_std + 1e-6)
+        # 1. 生成时间步 t (如果未传入)
+        if t is None:
+            t = torch.randint(0, self.config.diffusion_steps, (b,), device=device)
+            
+        # 2. 生成噪声
+        noise = torch.randn_like(x_start)
         
-        # 生成噪声
-        noise = torch.randn_like(normalized_features)
+        # 3. 前向加噪 (q_sample) - 只加一次
+        # 使用 diffusion_model 内部的 q_sample，它会正确使用 sqrt_alphas_cumprod
+        x_noisy = diffusion_model.q_sample(x_start=x_start, t=t, noise=noise)
         
-        # 前向加噪
-        with torch.no_grad():
-            x_noisy = diffusion_model.q_sample(x_start=normalized_features, t=t, noise=noise)
-            if torch.isnan(x_noisy).any():
-                x_noisy = torch.nan_to_num(x_noisy, nan=0.0)
+        # 处理 NaN
+        if torch.isnan(x_noisy).any():
+            x_noisy = torch.nan_to_num(x_noisy, nan=0.0)
         
-        # 预测目标
+        # 4. 预测目标
         if diffusion_model.objective == 'pred_noise':
             target = noise
         elif diffusion_model.objective == 'pred_x0':
-            target = normalized_features
+            target = x_start  # [修复2] 目标是原始的 x_start，而非归一化后的
         else:
             raise ValueError(f'Unknown objective: {diffusion_model.objective}')
         
-        # 模型预测
+        # 5. 模型预测
         model_output = diffusion_model.model(x_noisy, t, labels)
         
-        # 计算损失
+        # 6. 计算损失
         loss = F.mse_loss(model_output, target, reduction='none')
         loss = loss.mean(dim=[1, 2])
         
