@@ -46,14 +46,14 @@ parser.add_argument('--training_strategy', default='strategy_a', type=str, choic
 
 # 训练策略A特有参数
 parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
-parser.add_argument('--lambda_ema', default=0.3, type=float, help='EMA decay rate for class prototypes')
+parser.add_argument('--lambda_ema', default=0.2, type=float, help='EMA decay rate for class prototypes')
 parser.add_argument('--eta_p', default=0.05, type=float, help='weight for prototype loss')
 parser.add_argument('--eta_r', default=0.05, type=float, help='weight for radius constraint loss (previously covariance loss)')
 parser.add_argument('--lambda_sem', default=0.01, type=float, help='weight for semantic loss')
 parser.add_argument('--gamma_ge', default=0.15, type=float, help='weight for generation loss')
 parser.add_argument('--warmup_epochs', default=30, type=int, help='warmup epochs for semantic loss')
 parser.add_argument('--generation_interval', default=10, type=int, help='generation interval for fake features')
-parser.add_argument('--ddim_steps', default=50, type=int, help='DDIM sampling steps')
+parser.add_argument('--ddim_steps', default=200, type=int, help='DDIM sampling steps')
 
 # 等半径约束参数
 parser.add_argument('--use_radius_constraint', default=True, type=bool, help='whether to use radius constraint instead of covariance matching')
@@ -63,6 +63,23 @@ parser.add_argument('--target_radius', default=1.0, type=float, help='default ta
 parser.add_argument('--use_wcdas', default=False, type=bool, help='whether to use WCDAS for accuracy calculation') #WCDAS是否参与准确率计算，false时使用CE
 parser.add_argument('--wcdas_gamma', default=0, type=float, help='initial gamma parameter for WCDAS')
 parser.add_argument('--wcdas_traiFalsenable_scale', default=False, type=bool, help='whether the scale parameter in WCDAS is trainable')
+
+# ==================== GALD-DC 增强参数 ====================
+# 分布校准参数 (Section 2.4)
+parser.add_argument('--tau', default=-1, type=int, 
+                    help='头部/尾部类别样本数阈值 (-1=自动计算, 正整数=手动指定)')
+parser.add_argument('--lambda_cal', default=0.5, type=float, help='尾部类半径校准混合因子 λ (0=pure prior, 1=pure observed)')
+
+# 判别边距约束参数 (Section 2.6)
+parser.add_argument('--eta_m', default=0.1, type=float, help='边距损失权重 (weight for margin loss)')
+parser.add_argument('--margin_m', default=1.0, type=float, help='边距距离 m (margin distance for class separation)')
+
+# Stage 3 训练模式参数
+parser.add_argument('--stage3_mode', default='hybrid', type=str, choices=['stable', 'hybrid'],
+                    help="Stage 3 训练模式: 'stable'(冻结Encoder) 或 'hybrid'(解冻Encoder+一致性损失)")
+parser.add_argument('--stage3_start_epoch', default=100, type=int, help='Stage 3 开始的 epoch (before this: Stage 2)')
+parser.add_argument('--beta_cons', default=0.1, type=float, help='一致性损失权重 β (consistency loss weight, hybrid mode only)')
+parser.add_argument('--gamma_pseudo', default=1.0, type=float, help='伪特征分类损失权重 γ (pseudo feature loss weight)')
 
 
 def main():

@@ -496,3 +496,162 @@ class LossCalculator:
             total_loss = real_loss
         
         return total_loss
+    
+    # ==================== GALD-DC 增强功能 ====================
+    
+    def compute_margin_loss(self, estimated_clean: torch.Tensor, labels: torch.Tensor,
+                           class_prototypes: Dict[int, torch.Tensor], 
+                           num_classes: int, margin: float) -> torch.Tensor:
+        """
+        计算判别边距约束损失 (GALD-DC Section 2.6)
+        
+        公式: L_margin = E[(m + ||z0 - μ_y||² - ||z0 - μ_y-||²)]+
+        
+        作用: 将样本推离最近的负类原型，形成至少 margin m 的隔离带
+        """
+        device = estimated_clean.device
+        batch_size = estimated_clean.size(0)
+        
+        # 数值稳定性检查
+        if torch.isnan(estimated_clean).any() or torch.isinf(estimated_clean).any():
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        
+        # 裁剪特征防止数值爆炸
+        estimated_clean = torch.clamp(estimated_clean, 
+                                     min=-self.config.feature_clamp_max,
+                                     max=self.config.feature_clamp_max)
+        
+        # 构建原型矩阵 [num_classes, feature_dim]
+        prototype_matrix = torch.zeros(num_classes, estimated_clean.size(1), device=device)
+        valid_prototypes = torch.zeros(num_classes, dtype=torch.bool, device=device)
+        
+        for cls_idx in range(num_classes):
+            if cls_idx in class_prototypes:
+                proto = class_prototypes[cls_idx]
+                if not (torch.isnan(proto).any() or torch.isinf(proto).any()):
+                    prototype_matrix[cls_idx] = proto.to(device)
+                    valid_prototypes[cls_idx] = True
+        
+        if valid_prototypes.sum() < 2:
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        
+        # 向量化计算所有样本到所有原型的距离 [batch_size, num_classes]
+        # 使用 estimated_clean 直接计算，保持梯度流
+        dists = torch.cdist(estimated_clean, prototype_matrix, p=2) ** 2
+        
+        # 收集有效样本的损失
+        margin_losses = []
+        
+        for i in range(batch_size):
+            cls_idx = labels[i].item()
+            if not (0 <= cls_idx < num_classes) or not valid_prototypes[cls_idx]:
+                continue
+            
+            # 到本类原型的距离
+            dist_to_pos = dists[i, cls_idx]
+            
+            # 找最近的负类原型距离
+            neg_mask = valid_prototypes.clone()
+            neg_mask[cls_idx] = False
+            if neg_mask.sum() == 0:
+                continue
+            
+            neg_dists = dists[i, neg_mask]
+            min_neg_dist = neg_dists.min()  # 保持梯度！
+            
+            # L_margin = max(0, m + dist_to_pos - dist_to_neg)
+            loss_item = F.relu(margin + dist_to_pos - min_neg_dist)
+            
+            if not (torch.isnan(loss_item) or torch.isinf(loss_item)):
+                margin_losses.append(loss_item)
+        
+        if len(margin_losses) == 0:
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        
+        margin_loss = torch.stack(margin_losses).mean()
+        margin_loss = torch.clamp(margin_loss, max=10.0)  # 数值稳定性
+        
+        return margin_loss
+    
+    def compute_calibrated_radius(self, observed_radii: torch.Tensor, 
+                                  r_prior: float, class_counts: torch.Tensor,
+                                  tau: int, lambda_cal: float) -> torch.Tensor:
+        """
+        计算校准半径 (GALD-DC Section 2.4)
+        
+        公式:
+            r_cal_y = r_obs_y                          (若 y ∈ C_head, 样本数 >= tau)
+            r_cal_y = λ·r_obs_y + (1-λ)·r_prior        (若 y ∈ C_tail, 样本数 < tau)
+        
+        作用: 防止尾部类因样本少而半径塌缩(r_obs -> 0)，用头部类先验撑开尾部类分布
+        
+        Args:
+            observed_radii: 观测半径 [num_classes]
+            r_prior: 头部类全局半径先验 (头部类平均半径)
+            class_counts: 每个类别的样本数 [num_classes]
+            tau: 头部/尾部类别阈值
+            lambda_cal: 校准混合因子
+            
+        Returns:
+            calibrated_radii: 校准后的半径 [num_classes]
+        """
+        device = observed_radii.device
+        num_classes = observed_radii.size(0)
+        calibrated_radii = observed_radii.clone()
+        
+        # 识别头部类和尾部类
+        head_mask = class_counts >= tau  # C_head
+        tail_mask = class_counts < tau   # C_tail
+        
+        # 头部类: 直接使用观测半径
+        # 尾部类: 混合校准
+        calibrated_radii[tail_mask] = (
+            lambda_cal * observed_radii[tail_mask] + 
+            (1 - lambda_cal) * r_prior
+        )
+        
+        return calibrated_radii
+    
+    def compute_head_class_prior(self, observed_radii: torch.Tensor, 
+                                 class_counts: torch.Tensor, tau: int) -> float:
+        """
+        计算头部类全局半径先验 r_prior (GALD-DC Section 1.2)
+        
+        公式: r_prior = (1/|C_head|) * Σ_{k ∈ C_head} r_k
+        
+        Args:
+            observed_radii: 观测半径 [num_classes]
+            class_counts: 每个类别的样本数 [num_classes]
+            tau: 头部/尾部类别阈值
+            
+        Returns:
+            r_prior: 头部类平均半径
+        """
+        head_mask = class_counts >= tau
+        
+        if head_mask.sum() == 0:
+            # 如果没有头部类，返回所有类的平均半径
+            return observed_radii.mean().item()
+        
+        r_prior = observed_radii[head_mask].mean().item()
+        return r_prior
+    
+    def compute_consistency_loss(self, current_features: torch.Tensor, 
+                                frozen_features: torch.Tensor) -> torch.Tensor:
+        """
+        计算特征一致性损失 (GALD-DC Stage 3-H Section 3.B.2)
+        
+        公式: L_cons = E[||E^(t)(x) - detach(E^(0)(x))||²]
+        
+        作用: 约束当前编码器特征不要偏离冻结编码器特征太远，
+              保证扩散模型学到的分布与当前特征空间对齐
+        
+        Args:
+            current_features: 当前编码器输出 E^(t)(x)
+            frozen_features: 冻结编码器输出 E^(0)(x)
+            
+        Returns:
+            consistency_loss: 一致性损失
+        """
+        # detach 冻结特征，梯度只流向当前编码器
+        return F.mse_loss(current_features, frozen_features.detach())

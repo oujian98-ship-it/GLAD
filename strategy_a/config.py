@@ -46,6 +46,21 @@ class TrainingConfig:
         self.wcdas_gamma = getattr(args, 'wcdas_gamma', -1)  # WCDAS的初始gamma参数
         self.wcdas_trainable_scale = getattr(args, 'wcdas_traiFalsenable_scale', False)  # WCDAS的缩放参数是否可训练
         
+        # ==================== GALD-DC 增强参数 ====================
+        # 分布校准参数 (Section 2.4)
+        self.tau = getattr(args, 'tau', -1)  # 头部/尾部类别样本数阈值 (-1=自动计算)
+        self.lambda_cal = getattr(args, 'lambda_cal', 0.5)  # 尾部类半径校准混合因子 λ
+        
+        # 判别边距约束参数 (Section 2.6)
+        self.eta_m = getattr(args, 'eta_m', 0.1)  # 边距损失权重
+        self.margin_m = getattr(args, 'margin_m', 2.0)  # 边距距离 m
+        
+        # Stage 3 训练模式参数
+        self.stage3_mode = getattr(args, 'stage3_mode', 'hybrid')  # 'stable' 或 'hybrid'
+        self.beta_cons = getattr(args, 'beta_cons', 0.1)  # 一致性损失权重 (仅hybrid模式)
+        self.gamma_pseudo = getattr(args, 'gamma_pseudo', 1.0)  # 伪特征分类损失权重
+        self.stage3_start_epoch = getattr(args, 'stage3_start_epoch', 100)  # Stage 3 开始的 epoch
+        
         # 数值稳定性参数 - 防止训练过程中的数值问题
         self.max_loss_weight = 5.0              
         self.max_diffusion_loss = 10.0            
@@ -117,4 +132,15 @@ class TrainingConfig:
         print(f"use_wcdas: {self.use_wcdas}")
         print(f"wcdas_gamma: {self.wcdas_gamma}")
         print(f"wcdas_trainable_scale: {self.wcdas_trainable_scale}")
+        print("=" * 50)
+        print("GALD-DC Enhancement Configuration")
+        print("=" * 50)
+        print(f"tau (head/tail threshold): {self.tau}")
+        print(f"lambda_cal (calibration factor): {self.lambda_cal}")
+        print(f"eta_m (margin loss weight): {self.eta_m}")
+        print(f"margin_m (margin distance): {self.margin_m}")
+        print(f"stage3_mode: {self.stage3_mode}")
+        print(f"stage3_start_epoch: {self.stage3_start_epoch}")
+        print(f"beta_cons (consistency weight): {self.beta_cons}")
+        print(f"gamma_pseudo (pseudo loss weight): {self.gamma_pseudo}")
         print("=" * 50)
