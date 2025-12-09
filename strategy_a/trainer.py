@@ -193,18 +193,14 @@ class StrategyATrainer:
                 diffusion_model.eval()
                 for param in diffusion_model.parameters(): param.requires_grad = False
         else:
-            # Stage 2: 冻结 Encoder 和 Classifier，只训练 Diffusion
+            # Stage 2: 冻结 Encoder，训练 Diffusion 和 Classifier
             encoder.eval()
             for param in encoder.parameters(): param.requires_grad = False
             diffusion_model.train()
-            # [修复1] Stage 2 冻结分类器，保护 Stage 1 建立的分类边界
-            classifier.eval()
-            for param in classifier.parameters(): param.requires_grad = False
         
-        # Stage 3 时分类器可训练
-        if is_stage3:
-            classifier.train()
-            for param in classifier.parameters(): param.requires_grad = True
+        # 分类器始终可训练（因为当前实现没有独立的 Stage 1 预训练阶段）
+        classifier.train()
+        for param in classifier.parameters(): param.requires_grad = True
         
         # 添加 margin 和 consistency 损失跟踪
         running_losses = {'real': 0.0, 'semantic': 0.0, 'gen': 0.0, 'margin': 0.0, 'consistency': 0.0, 'total': 0.0}

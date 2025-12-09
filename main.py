@@ -27,9 +27,9 @@ parser = argparse.ArgumentParser(description='Long-Tailed Diffusion Model traini
 parser.add_argument('--datapath', default=r"E:\Projects\LDMLR-main\data", type=str, help='dataset path')
 parser.add_argument('--config', default="./config/cifar10/cifar10_LSC_Mixup.txt", help='path to config file')
 
-parser.add_argument('--epoch', default=400, type=int, help='epoch number to train')
+parser.add_argument('--epoch', default=700, type=int, help='epoch number to train')
 parser.add_argument('--dataset', default="CIFAR10", type=str, help='dataset name it may be CIFAR10, CIFAR100 or ImageNet')
-parser.add_argument('--imb_factor', default=0.1, type=float, help='long-tailed imbalance factor')
+parser.add_argument('--imb_factor', default=0.01, type=float, help='long-tailed imbalance factor')
 parser.add_argument('--diffusion_epoch', default=201, type=int, help='diffusion epoch to train')
 parser.add_argument('--model_fixed', default='./pretrained_models/resnet32_cifar10_lt001.checkpoint', type=str, help='the encoder model path')
 parser.add_argument('--feature_ratio', default=0.20, type=float, help='The ratio of generating feature')
@@ -53,7 +53,7 @@ parser.add_argument('--lambda_sem', default=0.01, type=float, help='weight for s
 parser.add_argument('--gamma_ge', default=0.15, type=float, help='weight for generation loss')
 parser.add_argument('--warmup_epochs', default=30, type=int, help='warmup epochs for semantic loss')
 parser.add_argument('--generation_interval', default=10, type=int, help='generation interval for fake features')
-parser.add_argument('--ddim_steps', default=200, type=int, help='DDIM sampling steps')
+parser.add_argument('--ddim_steps', default=100, type=int, help='DDIM sampling steps')
 
 # 等半径约束参数
 parser.add_argument('--use_radius_constraint', default=True, type=bool, help='whether to use radius constraint instead of covariance matching')
