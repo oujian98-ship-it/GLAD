@@ -114,7 +114,7 @@ class TrainingMonitor:
         # Label Shift补偿结果
         # 注意：label_shift_acc 已经是百分比形式（由acc_cal返回），不需要再乘100
         improvement = label_shift_acc - (accuracy * 100)  # 将accuracy转为百分比后计算改进
-        print(f"{method_name} + Label Shift Results:")
+        print(f"Label Shift Results:")
         print(f"  Accuracy:        {label_shift_acc:.2f}% ")
         print(f"  MMF Acc:         {mmf_acc_pc}\n")
         
@@ -189,11 +189,11 @@ class TrainingMonitor:
             print(f"Training Complete - Final Results")
             
             # 输出最佳模型信息
-            print(f"Best {method_name} Model:")
+            print(f"Best {method_name} :")
             print(f"  Accuracy:        {100 * best_accuracy:.2f}%")
             print(f"  MMF Acc:         {best_mmf_acc}")
             
-            print(f"\n[Best {method_name} + Label Shift Model]")
+            print(f"\nBest Label Shift :")
             print(f"  Accuracy:        {best_label_shift_only:.2f}%")
             print(f"  MMF Acc:         {best_mmf_acc_pc_best}")
             
@@ -202,5 +202,5 @@ class TrainingMonitor:
             logging.info(f"Training Complete - Method: {method_name}")
             logging.info(f"  Best {method_name} Accuracy: {100 * best_accuracy:.2f}%")
             logging.info(f"  Best {method_name} MMF: {best_mmf_acc}")
-            logging.info(f"  Best {method_name} + Label Shift Accuracy: {best_label_shift_only:.2f}%")
-            logging.info(f"  Best {method_name} + Label Shift MMF: {best_mmf_acc_pc_best}")
+            logging.info(f"  Best   Label Shift Accuracy: {best_label_shift_only:.2f}%")
+            logging.info(f"  Best   Label Shift MMF: {best_mmf_acc_pc_best}")

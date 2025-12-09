@@ -68,7 +68,7 @@ parser.add_argument('--wcdas_traiFalsenable_scale', default=False, type=bool, he
 # 分布校准参数 (Section 2.4)
 parser.add_argument('--tau', default=-1, type=int, 
                     help='头部/尾部类别样本数阈值 (-1=自动计算, 正整数=手动指定)')
-parser.add_argument('--lambda_cal', default=0.5, type=float, help='尾部类半径校准混合因子 λ (0=pure prior, 1=pure observed)')
+parser.add_argument('--lambda_cal', default=0.3, type=float, help='尾部类半径校准混合因子 λ (0=pure prior, 1=pure observed)')
 
 # 判别边距约束参数 (Section 2.6)
 parser.add_argument('--eta_m', default=0.1, type=float, help='边距损失权重 (weight for margin loss)')
@@ -79,7 +79,7 @@ parser.add_argument('--stage3_mode', default='hybrid', type=str, choices=['stabl
                     help="Stage 3 训练模式: 'stable'(冻结Encoder) 或 'hybrid'(解冻Encoder+一致性损失)")
 parser.add_argument('--stage3_start_epoch', default=100, type=int, help='Stage 3 开始的 epoch (before this: Stage 2)')
 parser.add_argument('--beta_cons', default=0.1, type=float, help='一致性损失权重 β (consistency loss weight, hybrid mode only)')
-parser.add_argument('--gamma_pseudo', default=1.0, type=float, help='伪特征分类损失权重 γ (pseudo feature loss weight)')
+parser.add_argument('--gamma_pseudo', default=0.8, type=float, help='伪特征分类损失权重 γ (pseudo feature loss weight)')
 
 
 def main():
