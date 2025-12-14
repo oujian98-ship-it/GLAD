@@ -125,9 +125,9 @@ class LossCalculator:
             loss_type: 损失函数类型 ('ce', 'wcdas')
         """
         if loss_type == 'ce':
-            # 标准交叉熵损失
+            # 标准交叉熵损失 + Label Smoothing (减少过拟合)
             real_logits = classifier(real_features)
-            return F.cross_entropy(real_logits, labels)
+            return F.cross_entropy(real_logits, labels, label_smoothing=0.1)
         elif loss_type == 'wcdas':
             # WCDAS损失函数，需要class_sample_counts
             if class_sample_counts is None:
@@ -535,8 +535,9 @@ class LossCalculator:
         if valid_prototypes.sum() < 2:
             return torch.tensor(0.0, device=device, requires_grad=True)
         
-        # 向量化计算所有样本到所有原型的距离 [batch_size, num_classes]
+        # 向量化计算所有样本到所有原型的平方距离 [batch_size, num_classes]
         # 使用 estimated_clean 直接计算，保持梯度流
+        # 使用平方距离 ||z - μ||²，与文档公式一致
         dists = torch.cdist(estimated_clean, prototype_matrix, p=2) ** 2
         
         # 收集有效样本的损失
@@ -615,9 +616,7 @@ class LossCalculator:
     def compute_head_class_prior(self, observed_radii: torch.Tensor, 
                                  class_counts: torch.Tensor, tau: int) -> float:
         """
-        计算头部类全局半径先验 r_prior (GALD-DC Section 1.2)
-        
-        公式: r_prior = (1/|C_head|) * Σ_{k ∈ C_head} r_k
+        计算头部类全局半径先验 r_prior
         
         Args:
             observed_radii: 观测半径 [num_classes]

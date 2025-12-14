@@ -44,42 +44,44 @@ parser.add_argument('--generation_mmf', default=None, type=str, help='CNN fully 
 parser.add_argument('--training_strategy', default='strategy_a', type=str, choices=['original', 'strategy_a'], 
                     help='Training strategy to use: original or strategy_a')
 
-# 训练策略A特有参数
+# GALD
 parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
-parser.add_argument('--lambda_ema', default=0.2, type=float, help='EMA decay rate for class prototypes')
-parser.add_argument('--eta_p', default=0.05, type=float, help='weight for prototype loss')
-parser.add_argument('--eta_r', default=0.05, type=float, help='weight for radius constraint loss (previously covariance loss)')
+parser.add_argument('--lambda_ema', default=0.2, type=float, help='EMA decay rate for class prototypes (β_proto)')
+parser.add_argument('--beta_radius', default=0.1, type=float, help='EMA decay rate for class radii (β_radius)')
+parser.add_argument('--eta_p', default=0.1, type=float, help='weight for prototype loss')
+parser.add_argument('--eta_r', default=0.2, type=float, help='weight for radius constraint loss (previously covariance loss)')
 parser.add_argument('--lambda_sem', default=0.01, type=float, help='weight for semantic loss')
 parser.add_argument('--gamma_ge', default=0.15, type=float, help='weight for generation loss')
 parser.add_argument('--warmup_epochs', default=30, type=int, help='warmup epochs for semantic loss')
 parser.add_argument('--generation_interval', default=10, type=int, help='generation interval for fake features')
 parser.add_argument('--ddim_steps', default=100, type=int, help='DDIM sampling steps')
 
-# 等半径约束参数
+# Equal radius constraint parameter
 parser.add_argument('--use_radius_constraint', default=True, type=bool, help='whether to use radius constraint instead of covariance matching')
 parser.add_argument('--target_radius', default=1.0, type=float, help='default target radius for equal radius constraint (used for classes with no samples)')
 
-# WCDAS参数
+# WCDAS parameter
 parser.add_argument('--use_wcdas', default=False, type=bool, help='whether to use WCDAS for accuracy calculation') #WCDAS是否参与准确率计算，false时使用CE
 parser.add_argument('--wcdas_gamma', default=0, type=float, help='initial gamma parameter for WCDAS')
 parser.add_argument('--wcdas_traiFalsenable_scale', default=False, type=bool, help='whether the scale parameter in WCDAS is trainable')
 
-# ==================== GALD-DC 增强参数 ====================
-# 分布校准参数 (Section 2.4)
+# Distribution calibration parameters (Section 2.4)
 parser.add_argument('--tau', default=-1, type=int, 
-                    help='头部/尾部类别样本数阈值 (-1=自动计算, 正整数=手动指定)')
-parser.add_argument('--lambda_cal', default=0.3, type=float, help='尾部类半径校准混合因子 λ (0=pure prior, 1=pure observed)')
+                    help='Head/Tail category sample count threshold (-1=Auto calculation, Positive integer=Manual specification)')
+parser.add_argument('--lambda_cal', default=0.4, type=float, help='Tail radius calibration blending factor (0=pure prior, 1=pure observed)')
 
-# 判别边距约束参数 (Section 2.6)
-parser.add_argument('--eta_m', default=0.1, type=float, help='边距损失权重 (weight for margin loss)')
-parser.add_argument('--margin_m', default=1.0, type=float, help='边距距离 m (margin distance for class separation)')
+# Margin constraint parameters 
+parser.add_argument('--eta_m', default=0.25, type=float, help='Margin loss weight')
+parser.add_argument('--margin_m', default=3.5, type=float, help='Margin distance m')
 
-# Stage 3 训练模式参数
+# Stage 3 training mode parameters
 parser.add_argument('--stage3_mode', default='hybrid', type=str, choices=['stable', 'hybrid'],
-                    help="Stage 3 训练模式: 'stable'(冻结Encoder) 或 'hybrid'(解冻Encoder+一致性损失)")
-parser.add_argument('--stage3_start_epoch', default=100, type=int, help='Stage 3 开始的 epoch (before this: Stage 2)')
-parser.add_argument('--beta_cons', default=0.1, type=float, help='一致性损失权重 β (consistency loss weight, hybrid mode only)')
-parser.add_argument('--gamma_pseudo', default=0.8, type=float, help='伪特征分类损失权重 γ (pseudo feature loss weight)')
+                    help="Stage 3 training mode: 'stable'(freeze Encoder) or 'hybrid'(unfreeze Encoder+consistency loss)")
+parser.add_argument('--beta_cons', default=0.1, type=float, help='Consistency loss weight ')
+parser.add_argument('--gamma_pseudo', default=0.8, type=float, help='Pseudo-feature classification loss weight γ (hybrid mode only)')
+
+parser.add_argument('--stage1_end_epoch', default=100, type=int, help='Stage 1 end epoch (Enc+Cls pre-training)')
+parser.add_argument('--stage2_end_epoch', default=300, type=int, help='Stage 2 end epoch (Diffusion training)')
 
 
 def main():
@@ -89,16 +91,8 @@ def main():
     
     logs_dir = "./logs"
     log_filename = os.path.join(logs_dir, args.dataset + '_' + args.dataset + '_' +  str(args.imb_factor) + f"_{current_time}.log")
-    print(f"Command arguments - datapath: {args.datapath}")
-    print(f"Command arguments - model_fixed: {args.model_fixed}")
-    print(f"Command arguments - config: {args.config}")
-    print(f"Log file will be saved to: {log_filename}")
     logging.basicConfig(filename=log_filename, level=logging.INFO)
-    logging.info("--epoch: {} --dataset: {} --imb_factor:{} --feature_ratio:{} "
-          "--diffusion_step:{} (DDPM official)".format(args.epoch, args.dataset, args.imb_factor,
-                                                                             args.feature_ratio, args.diffusion_step))
-    print("--epoch: {} --dataset: {} --imb_factor:{} --feature_ratio:{} "
-          "--diffusion_step:{} (DDPM official)".format(args.epoch, args.dataset, args.imb_factor, args.feature_ratio, args.diffusion_step))
+    
     
     # Load data ------------------------------------------------------------------------------------------------------------------
     # ouput: dataloader of cifar10/cifar100/ImageNet

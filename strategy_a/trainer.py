@@ -118,41 +118,89 @@ class StrategyATrainer:
         tail_count = (train_class_counts < tau).sum().item()
         print(f">>> [GALD-DC] 头部类数量: {int(head_count)}, 尾部类数量: {int(tail_count)}")
         
-        # 7. 创建冻结编码器副本 E^(0) 用于 Stage 3-H 一致性损失
+        # 7. 创建冻结编码器副本 E^(0) - 但在 Stage 1 结束后才真正保存
         import copy
-        frozen_encoder = copy.deepcopy(encoder)
-        frozen_encoder.eval()
-        for param in frozen_encoder.parameters():
-            param.requires_grad = False
-        self.frozen_encoder = frozen_encoder
         self.r_prior = r_prior
-        self.class_counts = train_class_counts  # [修复2] 保存类别计数供尾部过采样使用
+        self.class_counts = train_class_counts  # 保存类别计数供尾部过采样使用
         
-        # 5. 主训练循环
+        # ==================== 三阶段分离训练 ====================
+        print(f"\n{'='*60}")
+        print("三阶段分离训练配置:")
+        print(f"  Stage 1 (Enc+Cls预训练): Epoch 0-{self.config.stage1_end_epoch-1}")
+        print(f"  Stage 2 (Diffusion训练): Epoch {self.config.stage1_end_epoch}-{self.config.stage2_end_epoch-1}")
+        print(f"  Stage 3 (受控微调):      Epoch {self.config.stage2_end_epoch}-{self.config.epochs-1}")
+        print(f"{'='*60}\n")
+        
         for epoch in range(self.config.epochs):
+            stage = self._get_training_stage(epoch)
             loss_weights = self._get_dynamic_loss_weights(epoch)
             
-            # 训练一个 Epoch (传入 r_prior 用于 GALD-DC 分布校准)
+            # Stage 1 结束时：一次性计算统计量并保存冻结编码器副本
+            if epoch == self.config.stage1_end_epoch:
+                print(f"\n{'='*60}")
+                print(f"[Stage 1 完成] 计算类统计量并冻结 Encoder...")
+                
+                # ====== CE Baseline 评估 ======
+                print(f"\n[CE Baseline 评估] Stage 1 结束时的纯 CE 训练结果:")
+                test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc = \
+                    self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
+                
+                # 保存 CE Baseline 结果到 monitor
+                self.monitor.ce_baseline_accuracy = accuracy
+                self.monitor.ce_baseline_label_shift_acc = label_shift_acc
+                self.monitor.ce_baseline_mmf = mmf_acc
+                self.monitor.ce_baseline_mmf_pc = mmf_acc_pc
+                
+                print(f"  CE Baseline Accuracy: {100 * accuracy:.2f}%")
+                print(f"  CE Baseline MMF: {mmf_acc}")
+                print(f"  CE Baseline Label Shift Accuracy: {label_shift_acc:.2f}%")
+                
+                with torch.no_grad():
+                    # 重新计算更准确的原型和半径（基于完全训练的 encoder）
+                    class_prototypes = self._compute_true_class_prototypes(
+                        encoder, train_set, class_prototypes, num_classes, feature_dim)
+                    target_radii = self._compute_target_radii_from_real_features(
+                        encoder, train_set, class_prototypes, num_classes)
+                    
+                    # 重新计算 r_prior
+                    r_prior = self.loss_calculator.compute_head_class_prior(
+                        target_radii, train_class_counts, self.tau)
+                    self.r_prior = r_prior
+                    print(f"  更新后 r_prior: {r_prior:.4f}")
+                    
+                    # 保存冻结编码器副本 E^(0)
+                    self.frozen_encoder = copy.deepcopy(encoder)
+                    self.frozen_encoder.eval()
+                    for param in self.frozen_encoder.parameters():
+                        param.requires_grad = False
+                    print(f"  冻结编码器副本 E^(0) 已保存")
+                print(f"{'='*60}\n")
+            
+            # 打印阶段切换信息
+            if epoch == 0 or epoch == self.config.stage1_end_epoch or epoch == self.config.stage2_end_epoch:
+                print(f"\n>>> [Stage {stage}] 开始 - Epoch {epoch}")
+            
+            # 训练一个 Epoch
             self._train_epoch(epoch, encoder, classifier, diffusion_model, optimizer,
                             train_set, class_prototypes, target_radii,
                             sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod,
                             num_classes, feature_dim, loss_weights, train_class_counts,
                             r_prior)
             
-            # 验证 (传入 train_class_counts 用于 WCDAS 修正)
-            test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc = \
-                self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
-            
-            self.monitor.log_validation(epoch, accuracy, test_loss, label_shift_acc, mmf_acc, mmf_acc_pc)
-            
-            # 保存最佳CE/WCDAS准确率模型
-            if accuracy > self.monitor.best_accuracy:
-                self._save_checkpoint(epoch, encoder, classifier, diffusion_model, optimizer, accuracy, 'ce')
-            
-            # 保存最佳Label Shift准确率模型
-            if label_shift_acc > self.monitor.best_label_shift_acc:
-                self.monitor.best_label_shift_acc = label_shift_acc
-                self._save_checkpoint(epoch, encoder, classifier, diffusion_model, optimizer, label_shift_acc, 'pc')
+            # 只在 Stage 3 计算准确率
+            if stage == 3:
+                test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc = \
+                    self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
+                
+                self.monitor.log_validation(epoch, accuracy, test_loss, label_shift_acc, mmf_acc, mmf_acc_pc)
+                
+                # 保存最佳模型
+                if accuracy > self.monitor.best_accuracy:
+                    self._save_checkpoint(epoch, encoder, classifier, diffusion_model, optimizer, accuracy, 'ce')
+                
+                if label_shift_acc > self.monitor.best_label_shift_acc:
+                    self.monitor.best_label_shift_acc = label_shift_acc
+                    self._save_checkpoint(epoch, encoder, classifier, diffusion_model, optimizer, label_shift_acc, 'pc')
             
             # 定期保存扩散模型
             if epoch % 50 == 0:
@@ -164,6 +212,15 @@ class StrategyATrainer:
         self.diffusion_model = diffusion_model
         self._save_accuracy_history()
     
+    def _get_training_stage(self, epoch: int) -> int:
+        """返回当前训练阶段: 1, 2, 或 3"""
+        if epoch < self.config.stage1_end_epoch:
+            return 1
+        elif epoch < self.config.stage2_end_epoch:
+            return 2
+        else:
+            return 3
+    
     def _train_epoch(self, epoch: int, encoder: nn.Module, classifier: nn.Module, 
                     diffusion_model: nn.Module, optimizer: optim.Optimizer,
                     train_set: DataLoader, 
@@ -174,60 +231,79 @@ class StrategyATrainer:
                     num_classes: int, feature_dim: int, loss_weights: Dict[str, float],
                     train_class_counts: torch.Tensor, r_prior: float = 1.0):
         
-        # ==================== GALD-DC 训练阶段控制 ====================
-        # Stage 2: epoch < stage3_start_epoch - 冻结 Encoder，训练 Diffusion + Classifier
-        # Stage 3: epoch >= stage3_start_epoch - 根据模式决定是否解冻 Encoder
-        is_stage3 = epoch >= self.config.stage3_start_epoch
         
-        if is_stage3:
+        stage = self._get_training_stage(epoch)
+        #训练 Encoder + Classifier，获取头部类半径先验
+        if stage == 1:
+            # Stage 1: 只训练 Encoder + Classifier (CE 预训练)
+            encoder.train()
+            classifier.train()
+            diffusion_model.eval()
+            for param in encoder.parameters(): param.requires_grad = True
+            for param in classifier.parameters(): param.requires_grad = True
+            for param in diffusion_model.parameters(): param.requires_grad = False
+        
+        elif stage == 2:
+            # Stage 2: 冻结 Encoder + Classifier，只训练 Diffusion
+            encoder.eval()
+            classifier.eval()
+            diffusion_model.train()
+            for param in encoder.parameters(): param.requires_grad = False
+            for param in classifier.parameters(): param.requires_grad = False
+            for param in diffusion_model.parameters(): param.requires_grad = True
+            
+        else:  # stage == 3
+            # Stage 3: 受控微调 (根据模式)
             if self.config.stage3_mode == 'hybrid':
                 # Stage 3-H: 解冻 Encoder，训练 Encoder + Classifier，冻结 Diffusion
                 encoder.train()
-                for param in encoder.parameters(): param.requires_grad = True
+                classifier.train()
                 diffusion_model.eval()
+                for param in encoder.parameters(): param.requires_grad = True
+                for param in classifier.parameters(): param.requires_grad = True
                 for param in diffusion_model.parameters(): param.requires_grad = False
             else:
                 # Stage 3-S: 冻结 Encoder 和 Diffusion，仅训练 Classifier
                 encoder.eval()
-                for param in encoder.parameters(): param.requires_grad = False
+                classifier.train()
                 diffusion_model.eval()
+                for param in encoder.parameters(): param.requires_grad = False
+                for param in classifier.parameters(): param.requires_grad = True
                 for param in diffusion_model.parameters(): param.requires_grad = False
-        else:
-            # Stage 2: 冻结 Encoder，训练 Diffusion 和 Classifier
-            encoder.eval()
-            for param in encoder.parameters(): param.requires_grad = False
-            diffusion_model.train()
         
-        # 分类器始终可训练（因为当前实现没有独立的 Stage 1 预训练阶段）
-        classifier.train()
-        for param in classifier.parameters(): param.requires_grad = True
-        
-        # 添加 margin 和 consistency 损失跟踪
-        running_losses = {'real': 0.0, 'semantic': 0.0, 'gen': 0.0, 'margin': 0.0, 'consistency': 0.0, 'total': 0.0}
+        # 添加损失跟踪 (包含 Stage 2 详细损失)
+        running_losses = {
+            'real': 0.0, 'diffusion': 0.0, 'prototype': 0.0, 'radius': 0.0,
+            'margin': 0.0, 'semantic': 0.0, 'gen': 0.0, 'consistency': 0.0, 'total': 0.0
+        }
         total_loss = 0.0 
         
         for batch_idx, (inputs, labels) in enumerate(train_set):
             inputs, labels = inputs.to(self.device), labels.to(self.device)
             
             # Forward - 根据训练阶段决定是否需要梯度
-            if is_stage3 and self.config.stage3_mode == 'hybrid':
+            if stage == 3 and self.config.stage3_mode == 'hybrid':
                 # Stage 3-H: Encoder 需要梯度，同时计算冻结编码器特征用于一致性损失
                 real_features = encoder.forward_no_fc(inputs)
                 with torch.no_grad():
                     frozen_features = self.frozen_encoder.forward_no_fc(inputs)
+            elif stage == 1:
+                # Stage 1: Encoder 需要梯度
+                real_features = encoder.forward_no_fc(inputs)
+                frozen_features = None
             else:
                 # Stage 2 或 Stage 3-S: Encoder 冻结
                 with torch.no_grad():
                     real_features = encoder.forward_no_fc(inputs)
                 frozen_features = None
             
-            # 计算损失 (传入 is_stage3, frozen_features, r_prior)
+            # 计算损失 (传入 stage, frozen_features, r_prior)
             losses = self._compute_batch_losses(
                 encoder, classifier, diffusion_model, 
                 real_features, inputs, labels,
                 class_prototypes, target_radii, sqrt_alphas_cumprod,
                 sqrt_one_minus_alphas_cumprod, num_classes, feature_dim, epoch, batch_idx, loss_weights,
-                train_class_counts, is_stage3, frozen_features, r_prior
+                train_class_counts, stage, frozen_features, r_prior
             )
             
             losses['total'].backward()
@@ -235,25 +311,27 @@ class StrategyATrainer:
             optimizer.step()
             optimizer.zero_grad()
 
-            #⬇️试试动态半径和固定半径的效果
-            # [动态更新] 在 Encoder 解冻后，使用 EMA 更新类别原型和目标半径
-            # 只在 Epoch >= 50 时更新，因为 Warmup 期 Encoder 冻结，特征空间不变
-            if epoch >= 50:
+            # Stage 2 EMA 更新统计量 (在扩散模型训练期间持续更新)
+            if stage == 2:
                 self._update_stats_ema(real_features.detach(), labels, class_prototypes, target_radii, num_classes)
-            # ⬆️
+            
             for key in running_losses:
                 running_losses[key] += losses[key].item()
             total_loss += losses['total'].item()
-            # 日志记录
+            
+            # 日志记录 (传入 stage 参数)
             if batch_idx % 100 == 0:
-                self.monitor.log_batch_progress(epoch, batch_idx, {k: v.item() for k, v in losses.items()})
+                self.monitor.log_batch_progress(epoch, batch_idx, {k: v.item() for k, v in losses.items()}, stage)
         
         train_loss = total_loss / len(train_set)
-        # 计算训练集准确率
-        train_accuracy = self._compute_train_accuracy(encoder, classifier, train_set, train_class_counts, num_classes) 
+        # 只在 Stage 3 计算训练集准确率
+        if stage == 3:
+            train_accuracy = self._compute_train_accuracy(encoder, classifier, train_set, train_class_counts, num_classes)
+        else:
+            train_accuracy = None
         
         avg_losses = {key: value / len(train_set) for key, value in running_losses.items()}
-        self.monitor.log_epoch_summary(epoch, avg_losses, train_accuracy, train_loss)
+        self.monitor.log_epoch_summary(epoch, avg_losses, train_accuracy, train_loss, stage)
     
     def _compute_batch_losses(self, encoder, classifier, diffusion_model, 
                              real_features: torch.Tensor, inputs: torch.Tensor, 
@@ -264,60 +342,62 @@ class StrategyATrainer:
                              num_classes: int, feature_dim: int, 
                              epoch: int, batch_idx: int, loss_weights: Dict[str, float],
                              train_class_counts: torch.Tensor,
-                             is_stage3: bool = False, frozen_features: torch.Tensor = None,
+                             stage: int = 1, frozen_features: torch.Tensor = None,
                              r_prior: float = 1.0) -> Dict[str, torch.Tensor]:
         """
-        计算批次损失 (GALD-DC 增强版)
+        计算批次损失 (三阶段分离训练版)
         
-        Stage 2: L = L_real + λ_sem * L_semantic + γ * L_gen
-        Stage 3-H: L = L_real + γ * L_pseudo + β * L_cons
+        Stage 1: L = L_CE (纯交叉熵预训练)
+        Stage 2: L = L_diffusion + η_p*L_proto + η_r*L_rad + η_m*L_margin (扩散模型训练)
+        Stage 3: L = L_real + γ*L_ge + β*L_cons (受控微调)
         """
         batch_size = inputs.size(0)
         
-        # ==================== 核心 1: 真实分类损失 ====================
-        if self.config.use_wcdas:
-            real_loss = self.loss_calculator.compute_real_loss(
-                classifier, real_features, labels, train_class_counts, 'wcdas'
-            )
-        else:
-            real_loss = self.loss_calculator.compute_real_loss(classifier, real_features, labels)
+        # 初始化损失值
+        real_loss = torch.tensor(0.0, device=self.device)
+        semantic_loss = torch.tensor(0.0, device=self.device)
+        gen_loss = torch.tensor(0.0, device=self.device)
+        margin_loss = torch.tensor(0.0, device=self.device)
+        consistency_loss = torch.tensor(0.0, device=self.device)
         
-        # ==================== Stage 3-H 一致性损失 ====================
-        if is_stage3 and self.config.stage3_mode == 'hybrid' and frozen_features is not None:
-            consistency_loss = self.loss_calculator.compute_consistency_loss(
-                real_features, frozen_features
-            )
-            consistency_loss = self._safe_loss(consistency_loss, 5.0)
-        else:
-            consistency_loss = torch.tensor(0.0, device=self.device)
-        
-        # ==================== 核心 2: 语义几何损失 (Stage 2) ====================
-        if not is_stage3:
-            # Stage 2: 训练扩散模型 + 几何约束
+        if stage == 1:
+            # ==================== Stage 1: 纯 CE 预训练 ====================
+            if self.config.use_wcdas:
+                real_loss = self.loss_calculator.compute_real_loss(
+                    classifier, real_features, labels, train_class_counts, 'wcdas'
+                )
+            else:
+                real_loss = self.loss_calculator.compute_real_loss(classifier, real_features, labels)
+            
+            total_loss = real_loss
+            
+        elif stage == 2:
+            # ==================== Stage 2: 扩散模型 + 几何约束训练 ====================
+            # 扩散损失
             diffusion_loss = self.loss_calculator.compute_diffusion_loss(
                 diffusion_model, real_features, labels, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod
             )
             
+            # 估计去噪特征用于几何约束
             estimated_clean = self._estimate_clean_features(
                 diffusion_model, real_features, labels, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod
             )
             
-            # 几何 Loss (Prototype + Radius + Margin)
+            # 原型损失
             prototype_loss = self.loss_calculator.compute_prototype_loss(
                 estimated_clean, labels, class_prototypes, num_classes
             )
             
-            # GALD-DC: 使用校准半径而非观测半径
+            # 校准半径损失 (GALD-DC)
             calibrated_radii = self.loss_calculator.compute_calibrated_radius(
                 target_radii, r_prior, train_class_counts, 
                 self.tau, self.config.lambda_cal
             )
-            
             radius_loss = self.loss_calculator.compute_radius_constraint_loss(
                 estimated_clean, labels, class_prototypes, calibrated_radii, num_classes
             )
             
-            # GALD-DC Section 2.6: 判别边距约束
+            # 判别边距损失 (GALD-DC)
             margin_loss = self.loss_calculator.compute_margin_loss(
                 estimated_clean, labels, class_prototypes, num_classes, self.config.margin_m
             )
@@ -328,50 +408,87 @@ class StrategyATrainer:
             radius_loss = self._safe_loss(radius_loss, 10.0)
             margin_loss = self._safe_loss(margin_loss, 10.0)
             
+            # [修复] Stage 2 几何约束 warmup
+            # 前 20% 的 Stage 2 epochs 使用较小的权重，让扩散模型先学习基本去噪
+            stage2_progress = (epoch - self.config.stage1_end_epoch) / (self.config.stage2_end_epoch - self.config.stage1_end_epoch)
+            warmup_factor = min(1.0, stage2_progress / 0.2)  # 前 20% 线性增长到 1.0
+            
+            # 总语义损失 (几何约束根据 warmup 调整)
             semantic_loss = (diffusion_loss + 
-                           self.config.eta_p * prototype_loss + 
-                           self.config.eta_r * radius_loss + 
-                           self.config.eta_m * margin_loss)
+                           warmup_factor * self.config.eta_p * prototype_loss + 
+                           warmup_factor * self.config.eta_r * radius_loss + 
+                           warmup_factor * self.config.eta_m * margin_loss)
             semantic_loss = self._safe_loss(semantic_loss, self.config.max_semantic_loss)
-        else:
-            # Stage 3: 不训练扩散模型，语义损失为 0
-            semantic_loss = torch.tensor(0.0, device=self.device)
-            margin_loss = torch.tensor(0.0, device=self.device)
-        
-        # ==================== 核心 3: 生成损失 ====================
-        # 课程学习: 前 7.5% Epoch 不使用生成数据
-        if epoch < (self.config.epochs * 0.075):
-            gen_loss = torch.tensor(0.0, device=self.device)
-        else:
+            
+            # Stage 2 总损失 (不包含 real_loss，因为分类器冻结)
+            total_loss = semantic_loss
+            
+        else:  # stage == 3
+            # ==================== Stage 3: 受控微调 ====================
+            # 真实数据分类损失
+            if self.config.use_wcdas:
+                real_loss = self.loss_calculator.compute_real_loss(
+                    classifier, real_features, labels, train_class_counts, 'wcdas'
+                )
+            else:
+                real_loss = self.loss_calculator.compute_real_loss(classifier, real_features, labels)
+            
+            # 一致性损失 (仅 hybrid 模式)
+            if self.config.stage3_mode == 'hybrid' and frozen_features is not None:
+                consistency_loss = self.loss_calculator.compute_consistency_loss(
+                    real_features, frozen_features
+                )
+                consistency_loss = self._safe_loss(consistency_loss, 5.0)
+            
+            # 伪特征分类损失 (on-the-fly 生成，带显式校准)
             gen_loss = self._compute_generation_loss(
                 diffusion_model, classifier, batch_size, feature_dim, 
-                sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, num_classes, batch_idx
+                sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod, num_classes, batch_idx,
+                class_prototypes=class_prototypes,  # 传入类原型
+                target_radii=target_radii           # 传入目标半径
             )
-        gen_loss = self._safe_loss(gen_loss, self.config.max_gen_loss)
-        
-        # ==================== 总损失计算 ====================
-        if is_stage3:
-            # Stage 3: L = L_real + γ * L_pseudo (gen_loss) + β * L_cons
+            gen_loss = self._safe_loss(gen_loss, self.config.max_gen_loss)
+            
+            # Stage 3 总损失
             total_loss = (real_loss + 
                          self.config.gamma_pseudo * gen_loss + 
                          self.config.beta_cons * consistency_loss)
-        else:
-            # Stage 2: L = L_real + λ_sem * L_semantic + γ * L_gen
-            total_loss = self.loss_calculator.compute_total_loss(
-                real_loss, semantic_loss, gen_loss, loss_weights
-            )
         
-        return {
-            'real': real_loss,
-            'semantic': semantic_loss,
-            'gen': gen_loss,
-            'margin': margin_loss,
-            'consistency': consistency_loss,
-            'total': total_loss
-        }
+        # 根据阶段返回不同的损失字典
+        if stage == 2:
+            return {
+                'real': real_loss,
+                'diffusion': diffusion_loss,
+                'prototype': prototype_loss,
+                'radius': radius_loss,
+                'margin': margin_loss,
+                'semantic': semantic_loss,
+                'gen': gen_loss,
+                'consistency': consistency_loss,
+                'total': total_loss
+            }
+        else:
+            return {
+                'real': real_loss,
+                'diffusion': torch.tensor(0.0, device=self.device),
+                'prototype': torch.tensor(0.0, device=self.device),
+                'radius': torch.tensor(0.0, device=self.device),
+                'margin': margin_loss,
+                'semantic': semantic_loss,
+                'gen': gen_loss,
+                'consistency': consistency_loss,
+                'total': total_loss
+            }
 
     def _compute_generation_loss(self, diffusion_model, classifier, batch_size, feature_dim, 
-                               sqrt_alphas, sqrt_one_minus_alphas, num_classes, batch_idx):
+                               sqrt_alphas, sqrt_one_minus_alphas, num_classes, batch_idx,
+                               class_prototypes: Dict[int, torch.Tensor] = None,
+                               target_radii: torch.Tensor = None):
+        """
+        计算生成特征的分类损失（带显式校准）
+        
+        改进: Stage 3显式应用GALD-DC校准机制
+        """
         if batch_idx % self.config.generation_interval != 0:
             return torch.tensor(0.0, device=self.device)
         
@@ -388,8 +505,35 @@ class StrategyATrainer:
             fake_labels = torch.randint(0, num_classes, (batch_size,), device=self.device)
         fake_features = torch.randn(batch_size, feature_dim, device=self.device)
         
+        # DDIM采样生成伪特征
         fake_features = self._ddim_sample(diffusion_model, fake_features, fake_labels, 
                                         time_steps, sqrt_alphas, sqrt_one_minus_alphas)
+        
+        # ==================== 显式校准机制 (GALD-DC Stage 3) ====================
+        # 检查是否启用校准且有必要参数
+        if (getattr(self.config, 'enable_stage3_calibration', True) and 
+            class_prototypes is not None and 
+            target_radii is not None and
+            hasattr(self, 'class_counts')):
+            
+            # 计算校准半径（与Stage 2一致）
+            calibrated_radii = self.loss_calculator.compute_calibrated_radius(
+                target_radii,              # 观测半径
+                self.r_prior,              # 头部类先验
+                self.class_counts,         # 类别样本数
+                self.tau,                  # 头/尾阈值
+                self.config.lambda_cal     # 校准混合因子
+            )
+            
+            # 应用校准（调整特征位置使其符合校准半径）
+            calibration_strength = getattr(self.config, 'stage3_calibration_strength', 0.5)
+            fake_features = self._calibrate_features(
+                fake_features,
+                fake_labels,
+                class_prototypes,
+                calibrated_radii,
+                calibration_strength=calibration_strength
+            )
         
         # [针对问题 3 的修复]
         # 生成数据是类别平衡的，因此这里的 counts 应该是均匀分布 (Uniform)
@@ -515,12 +659,20 @@ class StrategyATrainer:
                     dists = torch.norm(cls_feats - new_proto, p=2, dim=1)
                     current_avg_radius = dists.mean()
                     old_radius = target_radii[cls_idx]
-                    new_radius = (1 - self.config.lambda_ema) * old_radius + self.config.lambda_ema * current_avg_radius
+                    # 使用独立的 beta_radius 参数
+                    new_radius = (1 - self.config.beta_radius) * old_radius + self.config.beta_radius * current_avg_radius
                     target_radii[cls_idx] = new_radius
                 # 样本数 < 2 时跳过半径更新，保持旧值
 
     def _ddim_sample(self, diffusion_model, fake_features, fake_labels, time_steps, sqrt_alphas, sqrt_one_minus_alphas):
+        """
+        DDIM 采样生成伪特征
+        
+        修复: 最后一步应该返回 estimated_clean 而非混合噪声的 fake_features
+        """
         batch_size = fake_features.size(0)
+        estimated_clean = fake_features  # 初始化
+        
         for i in range(self.config.ddim_steps):
             current_step = time_steps[i]
             next_step = time_steps[i+1] if i < self.config.ddim_steps - 1 else -1
@@ -538,11 +690,104 @@ class StrategyATrainer:
                 alpha_next = sqrt_alphas[next_step]
                 sigma = torch.sqrt(1 - alpha_next**2)
                 fake_features = alpha_next * estimated_clean + sigma * predicted_noise
-        return fake_features
+        
+        # [修复] 返回最终的干净特征估计，而非混合噪声的 fake_features
+        return estimated_clean
+    
+    def _calibrate_features(self, features: torch.Tensor, labels: torch.Tensor, 
+                           class_prototypes: Dict[int, torch.Tensor], 
+                           calibrated_radii: torch.Tensor,
+                           calibration_strength: float = 1.0) -> torch.Tensor:
+        """
+        显式校准生成的伪特征，使其符合GALD-DC的半径约束
+        
+        核心思想:
+        1. 对于每个生成特征，计算其到对应类中心的距离
+        2. 如果距离与校准半径不一致，调整特征位置
+        3. 保持方向不变，只调整半径
+        
+        公式:
+            z_calibrated = μ_y + (z - μ_y) * (r_cal_y / ||z - μ_y||)
+        
+        其中:
+            - z: 原始生成特征
+            - μ_y: 类中心（原型）
+            - r_cal_y: 校准半径（来自GALD-DC）
+            - z_calibrated: 校准后的特征
+        
+        Args:
+            features: 生成的特征 [batch_size, feature_dim]
+            labels: 对应的类别标签 [batch_size]
+            class_prototypes: 类别原型字典 {class_idx: prototype_tensor}
+            calibrated_radii: 校准半径 [num_classes]
+            calibration_strength: 校准强度 (0.0=不校准, 1.0=完全校准到目标半径)
+            
+        Returns:
+            calibrated_features: 校准后的特征 [batch_size, feature_dim]
+        """
+        if calibration_strength <= 0.0:
+            return features  # 不进行校准
+        
+        calibrated = features.clone()
+        batch_size = features.size(0)
+        
+        for i in range(batch_size):
+            cls_idx = labels[i].item()
+            
+            # 检查类别索引有效性
+            if cls_idx not in class_prototypes:
+                continue
+            if cls_idx >= len(calibrated_radii):
+                continue
+            
+            # 获取类中心和目标半径
+            prototype = class_prototypes[cls_idx]
+            target_radius = calibrated_radii[cls_idx]
+            
+            # 数值稳定性检查
+            if torch.isnan(prototype).any() or torch.isinf(prototype).any():
+                continue
+            if torch.isnan(target_radius) or torch.isinf(target_radius):
+                continue
+            if target_radius <= 0:
+                continue
+            
+            # 计算当前特征到类中心的方向向量
+            direction = features[i] - prototype
+            current_radius = torch.norm(direction, p=2)
+            
+            # 避免除零
+            if current_radius < 1e-6:
+                # 如果特征几乎等于原型，随机生成一个方向
+                direction = torch.randn_like(direction)
+                current_radius = torch.norm(direction, p=2)
+            
+            # 归一化方向向量
+            direction_normalized = direction / current_radius
+            
+            # 计算目标位置（原型 + 方向 * 目标半径）
+            target_position = prototype + direction_normalized * target_radius
+            
+            # 根据校准强度插值
+            # strength=1.0: 完全移动到目标位置
+            # strength=0.5: 移动到中间位置
+            calibrated[i] = (1 - calibration_strength) * features[i] + \
+                          calibration_strength * target_position
+        
+        return calibrated
 
     def _estimate_clean_features(self, diffusion_model, real_features, labels, sqrt_alphas, sqrt_one_minus_alphas):
+        """
+        估计去噪后的干净特征，用于几何约束计算
+        
+        修复: 使用较小的 t 值范围 (0-200)，避免在高噪声步骤时估计质量太差
+        这样扩散模型可以更容易地学习几何结构
+        """
         batch_size = real_features.size(0)
-        t = torch.randint(0, self.config.diffusion_steps, (batch_size,), device=self.device)
+        # [修复] 限制 t 在较小范围内，提高估计质量
+        # 使用 0-200 而非 0-999，因为高噪声步骤的估计质量很差
+        max_t = min(200, self.config.diffusion_steps)
+        t = torch.randint(0, max_t, (batch_size,), device=self.device)
         noise = torch.randn_like(real_features)
         
         noisy_features = sqrt_alphas[t].view(-1, 1) * real_features + \

@@ -50,6 +50,7 @@ class TrainingConfig:
         # 分布校准参数 (Section 2.4)
         self.tau = getattr(args, 'tau', -1)  # 头部/尾部类别样本数阈值 (-1=自动计算)
         self.lambda_cal = getattr(args, 'lambda_cal', 0.5)  # 尾部类半径校准混合因子 λ
+        self.beta_radius = getattr(args, 'beta_radius', 0.1)  # 半径 EMA 更新速率 β_r
         
         # 判别边距约束参数 (Section 2.6)
         self.eta_m = getattr(args, 'eta_m', 0.1)  # 边距损失权重
@@ -58,14 +59,17 @@ class TrainingConfig:
         # Stage 3 训练模式参数
         self.stage3_mode = getattr(args, 'stage3_mode', 'hybrid')  # 'stable' 或 'hybrid'
         self.beta_cons = getattr(args, 'beta_cons', 0.1)  # 一致性损失权重 (仅hybrid模式)
-        self.gamma_pseudo = getattr(args, 'gamma_pseudo', 1.0)  # 伪特征分类损失权重
-        self.stage3_start_epoch = getattr(args, 'stage3_start_epoch', 100)  # Stage 3 开始的 epoch
+        self.gamma_pseudo = getattr(args, 'gamma_pseudo', 0.8)  # 伪特征分类损失权重
+        
+        # 三阶段分离训练配置
+        self.stage1_end_epoch = getattr(args, 'stage1_end_epoch', 100)  # Stage 1 结束 epoch
+        self.stage2_end_epoch = getattr(args, 'stage2_end_epoch', 300)  # Stage 2 结束 epoch
         
         # 数值稳定性参数 - 防止训练过程中的数值问题
         self.max_loss_weight = 5.0              
         self.max_diffusion_loss = 10.0            
         self.max_cov_loss = 5.0                  # 保留用于兼容性
-        self.max_radius_loss = 5.0               # 等半径约束损失的最大值
+        self.max_radius_loss = 50.0              # 等半径约束损失的最大值 (放宽以允许梯度传播)
         self.max_semantic_loss = 20.0           
         self.max_grad_norm = 0.9                  
                 
@@ -75,13 +79,18 @@ class TrainingConfig:
         self.feature_clamp_max = 10.0            
 
         self.gradient_accumulation_steps = 4      
-        self.weight_decay = 1e-4                  
+        self.weight_decay = 5e-4                  # [修复过拟合] 增加正则化 (原 1e-4)                  
         self.gradient_clipping_enabled = False    
         self.adaptive_lr_factor = 0.5             
         self.learning_rate_warmup_steps = 1000     
         
         # 设备配置
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # ==================== Stage 3 显式校准参数 ====================
+        # Stage 3伪特征显式校准机制
+        self.enable_stage3_calibration = getattr(args, 'enable_stage3_calibration', True)  # 是否启用Stage 3校准
+        self.stage3_calibration_strength = getattr(args, 'stage3_calibration_strength', 0.5)  # 校准强度 (0.0-1.0)
     
     def to_dict(self) -> Dict:
         """将配置转换为字典格式"""
@@ -99,48 +108,110 @@ class TrainingConfig:
         
         return cls(args)
     
+    @classmethod
+    def from_optuna_trial(cls, trial, base_args, search_params: Dict = None) -> 'TrainingConfig':
+        """
+        从 Optuna Trial 创建配置对象
+        
+        Args:
+            trial: Optuna Trial 对象
+            base_args: 基础命令行参数
+            search_params: 已采样的超参数字典 (可选，如果为 None 则自动采样)
+        
+        Returns:
+            TrainingConfig: 配置对象
+        """
+        class Args:
+            pass
+        
+        args = Args()
+        
+        # 复制基础参数
+        for key, value in vars(base_args).items():
+            setattr(args, key, value)
+        
+        # 如果提供了搜索参数，直接使用
+        if search_params is not None:
+            for key, value in search_params.items():
+                setattr(args, key, value)
+        
+        return cls(args)
+    
+    def to_json(self) -> str:
+        """将配置序列化为 JSON 字符串"""
+        import json
+        
+        # 过滤掉不可序列化的对象
+        serializable = {}
+        for key, value in self.__dict__.items():
+            if key == 'device':
+                serializable[key] = str(value)
+            elif isinstance(value, (int, float, str, bool, list, dict, type(None))):
+                serializable[key] = value
+        
+        return json.dumps(serializable, indent=2, ensure_ascii=False)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'TrainingConfig':
+        """从 JSON 字符串创建配置对象"""
+        import json
+        config_dict = json.loads(json_str)
+        return cls.from_dict(config_dict)
+    
     def update(self, key: str, value) -> None:
         """更新特定配置项"""
         setattr(self, key, value)
     
     def log_config(self) -> None:
-        """打印当前配置信息"""
-        print("=" * 50)
-        print("Training Strategy A Configuration Information")
-        print("=" * 50)
-        print(f"dataset: {self.dataset}")
-        print(f"imb_factor: {self.imb_factor}")
-        print(f"epochs: {self.epochs}")
-        print(f"learn rate: {self.lr}")
-        print(f"diffusion_steps: {self.diffusion_steps}")
-        print(f"lambda_sem: {self.lambda_sem}")
-        print(f"gamma_ge: {self.gamma_ge}")
-        print(f"generation_interval: {self.generation_interval}")
-        print(f"ddim_steps: {self.ddim_steps}")
-        print(f"use_lr_scheduler: {self.use_lr_scheduler}")
-        print(f"lr_scheduler_type: {self.lr_scheduler_type}")
-        print(f"lr_min_ratio: {self.lr_min_ratio}")
-        print("=" * 50)
-        print("Equal Radius Constraint Configuration")
-        print("=" * 50)
-        print(f"use_radius_constraint: {self.use_radius_constraint}")
-        print(f"default target_radius: {self.target_radius}")
-        print(f"eta_r (radius constraint weight): {self.eta_r}")
-        print("=" * 50)
-        print("WCDAS Configuration")
-        print("=" * 50)
-        print(f"use_wcdas: {self.use_wcdas}")
-        print(f"wcdas_gamma: {self.wcdas_gamma}")
-        print(f"wcdas_trainable_scale: {self.wcdas_trainable_scale}")
-        print("=" * 50)
-        print("GALD-DC Enhancement Configuration")
-        print("=" * 50)
-        print(f"tau (head/tail threshold): {self.tau}")
-        print(f"lambda_cal (calibration factor): {self.lambda_cal}")
-        print(f"eta_m (margin loss weight): {self.eta_m}")
-        print(f"margin_m (margin distance): {self.margin_m}")
-        print(f"stage3_mode: {self.stage3_mode}")
-        print(f"stage3_start_epoch: {self.stage3_start_epoch}")
-        print(f"beta_cons (consistency weight): {self.beta_cons}")
-        print(f"gamma_pseudo (pseudo loss weight): {self.gamma_pseudo}")
-        print("=" * 50)
+        """打印当前配置信息并写入日志文件"""
+        import logging
+        
+        lines = [
+            "=" * 60,
+            "GALD-DC Training Configuration",
+            "=" * 60,
+            f"dataset: {self.dataset}",
+            f"imb_factor: {self.imb_factor}",
+            f"epochs: {self.epochs}",
+            f"learning_rate: {self.lr}",
+            f"weight_decay: {self.weight_decay}",
+            f"diffusion_steps: {self.diffusion_steps}",
+            f"ddim_steps: {self.ddim_steps}",
+            "-" * 60,
+            "Loss Weights:",
+            f"  lambda_ema: {self.lambda_ema}",
+            f"  beta_radius: {getattr(self, 'beta_radius', self.lambda_ema)}",
+            f"  eta_p (prototype loss): {self.eta_p}",
+            f"  eta_r (radius loss): {self.eta_r}",
+            f"  eta_m (margin loss): {self.eta_m}",
+            f"  lambda_sem: {self.lambda_sem}",
+            f"  gamma_ge (gen loss): {self.gamma_ge}",
+            "-" * 60,
+            "GALD-DC Parameters:",
+            f"  tau (head/tail threshold): {self.tau}",
+            f"  lambda_cal (calibration factor): {self.lambda_cal}",
+            f"  margin_m (margin distance): {self.margin_m}",
+            f"  stage3_mode: {self.stage3_mode}",
+            f"  beta_cons (consistency weight): {self.beta_cons}",
+            f"  gamma_pseudo (pseudo loss weight): {self.gamma_pseudo}",
+            "-" * 60,
+            "Stage 3 Explicit Calibration:",
+            f"  enable_stage3_calibration: {self.enable_stage3_calibration}",
+            f"  stage3_calibration_strength: {self.stage3_calibration_strength}",
+            "-" * 60,
+            "Three-Stage Training:",
+            f"  Stage 1 (CE Pre-training): epochs 0-{self.stage1_end_epoch - 1}",
+            f"  Stage 2 (Diffusion Training): epochs {self.stage1_end_epoch}-{self.stage2_end_epoch - 1}",
+            f"  Stage 3 (Controlled Fine-tuning): epochs {self.stage2_end_epoch}-{self.epochs - 1}",
+            "-" * 60,
+            "Other Settings:",
+            f"  use_wcdas: {self.use_wcdas}",
+            f"  use_radius_constraint: {self.use_radius_constraint}",
+            f"  generation_interval: {self.generation_interval}",
+            "=" * 60,
+        ]
+        
+        # 同时打印到控制台和写入日志文件
+        for line in lines:
+            print(line)
+            logging.info(line)

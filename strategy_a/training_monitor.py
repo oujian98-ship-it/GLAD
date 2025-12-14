@@ -29,6 +29,12 @@ class TrainingMonitor:
         self.best_accuracy = 0.0  # 最佳CE/WCDAS准确率
         self.best_label_shift_acc = 0.0  # 最佳Label Shift准确率
         self.accuracies_history = []  # 保存每个epoch的准确率历史
+        
+        # CE Baseline 结果 (Stage 1 结束时记录)
+        self.ce_baseline_accuracy = 0.0
+        self.ce_baseline_label_shift_acc = 0.0
+        self.ce_baseline_mmf = [0, 0, 0]
+        self.ce_baseline_mmf_pc = [0, 0, 0]
     
     def _setup_logging(self):
         """
@@ -36,8 +42,14 @@ class TrainingMonitor:
         """
         current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         
-        # 确保logs目录存在
-        logs_dir = "../logs"
+        # 使用项目根目录的 logs 文件夹 (修复相对路径问题)
+        # 获取当前文件所在目录，向上一级到达项目根目录
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        logs_dir = os.path.join(project_root, "logs")
+        
+        # 确保 logs 目录存在
+        os.makedirs(logs_dir, exist_ok=True)
+        
         log_filename = os.path.join(logs_dir, f"{self.config.dataset}_strategy_A_{self.config.imb_factor}_{current_time}.log")
         logging.basicConfig(
             filename=log_filename, 
@@ -45,39 +57,61 @@ class TrainingMonitor:
             format='%(asctime)s - %(levelname)s - %(message)s'
         )
     
-    def log_batch_progress(self, epoch: int, batch_idx: int, losses: Dict[str, float]):
+    def log_batch_progress(self, epoch: int, batch_idx: int, losses: Dict[str, float], stage: int = 3):
         """
-        记录批次进度
+        记录批次进度 (根据阶段显示不同内容)
         """
         if batch_idx % 100 == 0:
-            print(f"Epoch: {epoch}, Batch: {batch_idx}, "
-                  f"Real Loss: {losses['real']:.4f}, "
-                  f"Semantic Loss: {losses['semantic']:.4f}, "
-                  f"Gen Loss: {losses['gen']:.4f}, "
-                  f"Total Loss: {losses['total']:.4f}")
+            if stage == 1:
+                print(f" Epoch: {epoch}, Batch: {batch_idx}, CE Loss: {losses['real']:.4f}")
+            elif stage == 2:
+                print(f" Epoch: {epoch}, Batch: {batch_idx}, "
+                      f"L_LDM: {losses.get('diffusion', 0):.4f}, "
+                      f"L_proto: {losses.get('prototype', 0):.4f}, "
+                      f"L_rad: {losses.get('radius', 0):.4f}, "
+                      f"L_margin: {losses.get('margin', 0):.4f}")
+            else:
+                print(f" Epoch: {epoch}, Batch: {batch_idx}, "
+                      f"Real: {losses['real']:.4f}, Gen: {losses['gen']:.4f}, "
+                      f"Cons: {losses.get('consistency', 0):.4f}")
     
     def log_epoch_summary(self, epoch: int, avg_losses: Dict[str, float], 
-                         train_accuracy: float = None, train_loss: float = None):
+                         train_accuracy: float = None, train_loss: float = None, stage: int = 3):
         """
-        记录轮次总结
+        记录轮次总结 (根据阶段显示不同内容)
         """
-        if train_loss is not None and train_accuracy is not None:
-            logging.info("cnn training loss is {}; cnn training accuracy is {:.2f}".format(
-                train_loss, train_accuracy * 100))
-            print("cnn training loss is {}; cnn training accuracy is {:.2f}".format(
-                train_loss, train_accuracy * 100))
+        if stage == 1:
+            # Stage 1: 只输出 CE 损失
+            msg = f" Epoch {epoch} - CE Loss: {avg_losses['real']:.4f}"
+            print(msg)
+            logging.info(msg)
+            
+        elif stage == 2:
+            # Stage 2: 输出详细的扩散和几何损失
+            msg = (f"Epoch {epoch} - "
+                   f"L_LDM: {avg_losses.get('diffusion', 0):.4f}, "
+                   f"L_proto: {avg_losses.get('prototype', 0):.4f}, "
+                   f"L_rad: {avg_losses.get('radius', 0):.4f}, "
+                   f"L_margin: {avg_losses.get('margin', 0):.4f}, "
+                   f"Total: {avg_losses['total']:.4f}")
+            print(msg)
+            logging.info(msg)
+            
+        else:  # stage == 3
+            # Stage 3: 完整输出
+            if train_loss is not None and train_accuracy is not None:
+                logging.info("cnn training loss is {}; cnn training accuracy is {:.2f}".format(
+                    train_loss, train_accuracy * 100))
+                print("cnn training loss is {}; cnn training accuracy is {:.2f}".format(
+                    train_loss, train_accuracy * 100))
 
-        print(f"Epoch {epoch} Summary - "
-              f"Real Loss: {avg_losses['real']:.4f}, "
-              f"Semantic Loss: {avg_losses['semantic']:.4f}, "
-              f"Gen Loss: {avg_losses['gen']:.4f}, "
-              f"Total Loss: {avg_losses['total']:.4f}")
-        
-        logging.info(f"Epoch {epoch} Summary - "
-                    f"Real Loss: {avg_losses['real']:.4f}, "
-                    f"Semantic Loss: {avg_losses['semantic']:.4f}, "
-                    f"Gen Loss: {avg_losses['gen']:.4f}, "
-                    f"Total Loss: {avg_losses['total']:.4f}")
+            msg = (f"Epoch {epoch} Summary - "
+                   f"Real Loss: {avg_losses['real']:.4f}, "
+                   f"Gen Loss: {avg_losses['gen']:.4f}, "
+                   f"Consistency: {avg_losses.get('consistency', 0):.4f}, "
+                   f"Total: {avg_losses['total']:.4f}")
+            print(msg)
+            logging.info(msg)
     
     def log_validation(self, epoch: int, accuracy: float, test_loss: float, 
                       label_shift_acc: float, mmf_acc: List, mmf_acc_pc: List, 
@@ -105,8 +139,9 @@ class TrainingMonitor:
         
         # 输出分隔线
         print(f"Epoch {epoch} Validation Results")
-        # 主方法结果
-        print(f"{method_name} Results:")
+        # 主方法结果 - 使用 "Ours" 后缀表示包含 GALD-DC 增强
+        method_display = f"{method_name} " if method_name == "CE" else method_name
+        print(f"{method_display} Results:")
         print(f"  Test Loss:       {test_loss:.4f}")
         print(f"  Accuracy:        {100 * accuracy:.2f}%")
         print(f"  MMF Acc:         {mmf_acc}")
@@ -120,18 +155,18 @@ class TrainingMonitor:
         
         
         # 记录到日志文件
-        logging.info(f"Epoch {epoch} - Method: {method_name}")
-        logging.info(f"  {method_name} Accuracy: {100 * accuracy:.2f}%, Test Loss: {test_loss:.4f}")
-        logging.info(f"  {method_name} MMF: {mmf_acc}")
-        logging.info(f"  {method_name} + Label Shift Accuracy: {label_shift_acc:.2f}% ")
-        logging.info(f"  {method_name} + Label Shift MMF: {mmf_acc_pc}")
+        logging.info(f"Epoch {epoch} - Method: {method_display}")
+        logging.info(f"  {method_display} Accuracy: {100 * accuracy:.2f}%, Test Loss: {test_loss:.4f}")
+        logging.info(f"  {method_display} MMF: {mmf_acc}")
+        logging.info(f"  Label Shift  Accuracy: {label_shift_acc:.2f}% ")
+        logging.info(f"  Label Shift  MMF: {mmf_acc_pc}")
         logging.info("")
         
         # 更新最佳准确率
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
-            print(f" New best {method_name} accuracy: {100 * accuracy:.2f}%\n")
-            logging.info(f"New best {method_name} accuracy: {100 * accuracy:.2f}%")
+            print(f" New best {method_display} accuracy: {100 * accuracy:.2f}%\n")
+            logging.info(f"New best {method_display} accuracy: {100 * accuracy:.2f}%")
     
 
     
@@ -167,11 +202,30 @@ class TrainingMonitor:
     def log_training_complete(self):
         """
         记录训练完成信息，输出最佳模型准确率
+        同时对比 CE Baseline 和 CE + Ours 的结果
         """
+        # 确定方法名称
+        method_name = "WCDAS" if self.config.use_wcdas else "CE"
+        
+        # 输出分隔线
+        print(f"\n{'='*70}")
+        print(f"Training Complete - Final Results")
+        print(f"{'='*70}")
+        
+        # ====== CE Baseline 结果 (Stage 1 结束时) ======
+        print(f"\n[CE Baseline] (Stage 1 结束时的纯 CE 训练结果):")
+        print(f"  Accuracy:              {100 * self.ce_baseline_accuracy:.2f}%")
+        print(f"  MMF Acc:               {self.ce_baseline_mmf}")
+        print(f"  Label Shift Accuracy:  {self.ce_baseline_label_shift_acc:.2f}%")
+        print(f"  Label Shift MMF:       {self.ce_baseline_mmf_pc}")
+        
+        logging.info(f"[CE Baseline] (Stage 1):")
+        logging.info(f"  CE Baseline Accuracy: {100 * self.ce_baseline_accuracy:.2f}%")
+        logging.info(f"  CE Baseline MMF: {self.ce_baseline_mmf}")
+        logging.info(f"  CE Baseline Label Shift Accuracy: {self.ce_baseline_label_shift_acc:.2f}%")
+        logging.info(f"  CE Baseline Label Shift MMF: {self.ce_baseline_mmf_pc}")
+        
         if self.accuracies_history:
-            # 确定方法名称
-            method_name = "WCDAS" if self.config.use_wcdas else "CE"
-            
             # 找出最佳准确率和对应的Label Shift准确率
             best_epoch = max(self.accuracies_history, key=lambda x: x['base_accuracy'])
             best_accuracy = best_epoch['base_accuracy']
@@ -184,23 +238,30 @@ class TrainingMonitor:
             best_label_shift_only = best_label_shift_epoch['label_shift_acc']
             best_mmf_acc_pc_best = best_label_shift_epoch['label_shift_mmf']
             
-            # 输出分隔线
-            print(f"\n{'='*70}")
-            print(f"Training Complete - Final Results")
+            # ====== CE + Ours 结果 (Stage 3 最佳) ======
+            method_display = f"{method_name} + Ours" if method_name == "CE" else method_name
             
-            # 输出最佳模型信息
-            print(f"Best {method_name} :")
-            print(f"  Accuracy:        {100 * best_accuracy:.2f}%")
-            print(f"  MMF Acc:         {best_mmf_acc}")
+            print(f"\n[{method_display}] (Stage 3 最佳结果):")
+            print(f"  Accuracy:              {100 * best_accuracy:.2f}%")
+            print(f"  MMF Acc:               {best_mmf_acc}")
+            print(f"  Label Shift Accuracy:  {best_label_shift_only:.2f}%")
+            print(f"  Label Shift MMF:       {best_mmf_acc_pc_best}")
             
-            print(f"\nBest Label Shift :")
-            print(f"  Accuracy:        {best_label_shift_only:.2f}%")
-            print(f"  MMF Acc:         {best_mmf_acc_pc_best}")
+            # ====== 改进对比 ======
+            accuracy_improvement = (best_accuracy - self.ce_baseline_accuracy) * 100
+            label_shift_improvement = best_label_shift_only - self.ce_baseline_label_shift_acc
             
+            print(f"\n[改进幅度] (CE + Ours vs CE Baseline):")
+            print(f"  Accuracy 改进:         {accuracy_improvement:+.2f}%")
+            print(f"  Label Shift 改进:      {label_shift_improvement:+.2f}%")
+            print(f"{'='*70}")
             
             # 记录到日志文件
-            logging.info(f"Training Complete - Method: {method_name}")
-            logging.info(f"  Best {method_name} Accuracy: {100 * best_accuracy:.2f}%")
-            logging.info(f"  Best {method_name} MMF: {best_mmf_acc}")
-            logging.info(f"  Best   Label Shift Accuracy: {best_label_shift_only:.2f}%")
-            logging.info(f"  Best   Label Shift MMF: {best_mmf_acc_pc_best}")
+            logging.info(f"\n[{method_display}] (Stage 3):")
+            logging.info(f"  Best {method_display} Accuracy: {100 * best_accuracy:.2f}%")
+            logging.info(f"  Best {method_display} MMF: {best_mmf_acc}")
+            logging.info(f"  Best Label Shift Accuracy: {best_label_shift_only:.2f}%")
+            logging.info(f"  Best Label Shift MMF: {best_mmf_acc_pc_best}")
+            logging.info(f"\n[改进幅度]:")
+            logging.info(f"  Accuracy 改进: {accuracy_improvement:+.2f}%")
+            logging.info(f"  Label Shift 改进: {label_shift_improvement:+.2f}%")
