@@ -29,12 +29,6 @@ class TrainingMonitor:
         self.best_accuracy = 0.0  # 最佳CE/WCDAS准确率
         self.best_label_shift_acc = 0.0  # 最佳Label Shift准确率
         self.accuracies_history = []  # 保存每个epoch的准确率历史
-        
-        # CE Baseline 结果 (Stage 1 结束时记录)
-        self.ce_baseline_accuracy = 0.0
-        self.ce_baseline_label_shift_acc = 0.0
-        self.ce_baseline_mmf = [0, 0, 0]
-        self.ce_baseline_mmf_pc = [0, 0, 0]
     
     def _setup_logging(self):
         """
@@ -202,30 +196,11 @@ class TrainingMonitor:
     def log_training_complete(self):
         """
         记录训练完成信息，输出最佳模型准确率
-        同时对比 CE Baseline 和 CE + Ours 的结果
         """
-        # 确定方法名称
-        method_name = "WCDAS" if self.config.use_wcdas else "CE"
-        
-        # 输出分隔线
-        print(f"\n{'='*70}")
-        print(f"Training Complete - Final Results")
-        print(f"{'='*70}")
-        
-        # ====== CE Baseline 结果 (Stage 1 结束时) ======
-        print(f"\n[CE Baseline] (Stage 1 结束时的纯 CE 训练结果):")
-        print(f"  Accuracy:              {100 * self.ce_baseline_accuracy:.2f}%")
-        print(f"  MMF Acc:               {self.ce_baseline_mmf}")
-        print(f"  Label Shift Accuracy:  {self.ce_baseline_label_shift_acc:.2f}%")
-        print(f"  Label Shift MMF:       {self.ce_baseline_mmf_pc}")
-        
-        logging.info(f"[CE Baseline] (Stage 1):")
-        logging.info(f"  CE Baseline Accuracy: {100 * self.ce_baseline_accuracy:.2f}%")
-        logging.info(f"  CE Baseline MMF: {self.ce_baseline_mmf}")
-        logging.info(f"  CE Baseline Label Shift Accuracy: {self.ce_baseline_label_shift_acc:.2f}%")
-        logging.info(f"  CE Baseline Label Shift MMF: {self.ce_baseline_mmf_pc}")
-        
         if self.accuracies_history:
+            # 确定方法名称
+            method_name = "WCDAS" if self.config.use_wcdas else "CE"
+            
             # 找出最佳准确率和对应的Label Shift准确率
             best_epoch = max(self.accuracies_history, key=lambda x: x['base_accuracy'])
             best_accuracy = best_epoch['base_accuracy']
@@ -238,30 +213,26 @@ class TrainingMonitor:
             best_label_shift_only = best_label_shift_epoch['label_shift_acc']
             best_mmf_acc_pc_best = best_label_shift_epoch['label_shift_mmf']
             
-            # ====== CE + Ours 结果 (Stage 3 最佳) ======
+            # 输出分隔线
+            print(f"\n{'='*70}")
+            print(f"Training Complete - Final Results")
+            
+            # 使用 "Ours" 后缀表示包含 GALD-DC 增强
             method_display = f"{method_name} + Ours" if method_name == "CE" else method_name
             
-            print(f"\n[{method_display}] (Stage 3 最佳结果):")
-            print(f"  Accuracy:              {100 * best_accuracy:.2f}%")
-            print(f"  MMF Acc:               {best_mmf_acc}")
-            print(f"  Label Shift Accuracy:  {best_label_shift_only:.2f}%")
-            print(f"  Label Shift MMF:       {best_mmf_acc_pc_best}")
+            # 输出最佳模型信息
+            print(f"Best {method_display} :")
+            print(f"  Accuracy:        {100 * best_accuracy:.2f}%")
+            print(f"  MMF Acc:         {best_mmf_acc}")
             
-            # ====== 改进对比 ======
-            accuracy_improvement = (best_accuracy - self.ce_baseline_accuracy) * 100
-            label_shift_improvement = best_label_shift_only - self.ce_baseline_label_shift_acc
+            print(f"\nBest Label Shift  :")
+            print(f"  Accuracy:        {best_label_shift_only:.2f}%")
+            print(f"  MMF Acc:         {best_mmf_acc_pc_best}")
             
-            print(f"\n[改进幅度] (CE + Ours vs CE Baseline):")
-            print(f"  Accuracy 改进:         {accuracy_improvement:+.2f}%")
-            print(f"  Label Shift 改进:      {label_shift_improvement:+.2f}%")
-            print(f"{'='*70}")
             
             # 记录到日志文件
-            logging.info(f"\n[{method_display}] (Stage 3):")
+            logging.info(f"Training Complete - Method: {method_display}")
             logging.info(f"  Best {method_display} Accuracy: {100 * best_accuracy:.2f}%")
             logging.info(f"  Best {method_display} MMF: {best_mmf_acc}")
-            logging.info(f"  Best Label Shift Accuracy: {best_label_shift_only:.2f}%")
-            logging.info(f"  Best Label Shift MMF: {best_mmf_acc_pc_best}")
-            logging.info(f"\n[改进幅度]:")
-            logging.info(f"  Accuracy 改进: {accuracy_improvement:+.2f}%")
-            logging.info(f"  Label Shift 改进: {label_shift_improvement:+.2f}%")
+            logging.info(f"  Best Label Shift  Accuracy: {best_label_shift_only:.2f}%")
+            logging.info(f"  Best Label Shift  MMF: {best_mmf_acc_pc_best}")

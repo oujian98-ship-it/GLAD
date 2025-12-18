@@ -79,7 +79,7 @@ class TrainingConfig:
         self.feature_clamp_max = 10.0            
 
         self.gradient_accumulation_steps = 4      
-        self.weight_decay = 5e-4                  # [修复过拟合] 增加正则化 (原 1e-4)                  
+        self.weight_decay = 2e-3                  # [减少过拟合] 增大正则化 (原 5e-4 → 2e-3)                  
         self.gradient_clipping_enabled = False    
         self.adaptive_lr_factor = 0.5             
         self.learning_rate_warmup_steps = 1000     

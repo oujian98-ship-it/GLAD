@@ -1,0 +1,40 @@
+[
+  {
+    "number": 0,
+    "value": 0.7469,
+    "params": {
+      "lr": 0.0005611516415334506,
+      "margin_m": 5.0,
+      "lambda_cal": 0.6,
+      "eta_m": 0.3,
+      "eta_p": 0.05,
+      "eta_r": 0.15000000000000002,
+      "beta_cons": 0.05,
+      "gamma_pseudo": 0.9000000000000001,
+      "stage1_end_epoch": 80,
+      "stage2_end_epoch": 175
+    },
+    "state": "TrialState.COMPLETE",
+    "datetime_start": "2025-12-14T11:18:38.952625",
+    "datetime_complete": "2025-12-14T14:25:17.550057"
+  },
+  {
+    "number": 1,
+    "value": 0.7564,
+    "params": {
+      "lr": 0.00010994335574766199,
+      "margin_m": 5.0,
+      "lambda_cal": 0.6,
+      "eta_m": 0.15000000000000002,
+      "eta_p": 0.1,
+      "eta_r": 0.15000000000000002,
+      "beta_cons": 0.1,
+      "gamma_pseudo": 0.7,
+      "stage1_end_epoch": 70,
+      "stage2_end_epoch": 125
+    },
+    "state": "TrialState.COMPLETE",
+    "datetime_start": "2025-12-14T14:25:17.764877",
+    "datetime_complete": "2025-12-14T18:31:31.244630"
+  }
+]

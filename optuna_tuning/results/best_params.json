@@ -1,0 +1,18 @@
+{
+  "best_value": 0.7564,
+  "best_params": {
+    "lr": 0.00010994335574766199,
+    "margin_m": 5.0,
+    "lambda_cal": 0.6,
+    "eta_m": 0.15000000000000002,
+    "eta_p": 0.1,
+    "eta_r": 0.15000000000000002,
+    "beta_cons": 0.1,
+    "gamma_pseudo": 0.7,
+    "stage1_end_epoch": 70,
+    "stage2_end_epoch": 125
+  },
+  "best_trial_number": 1,
+  "n_trials": 2,
+  "timestamp": "2025-12-14T18:31:31.480853"
+}

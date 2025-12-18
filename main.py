@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser(description='Long-Tailed Diffusion Model traini
 parser.add_argument('--datapath', default=r"E:\Projects\LDMLR-main\data", type=str, help='dataset path')
 parser.add_argument('--config', default="./config/cifar10/cifar10_LSC_Mixup.txt", help='path to config file')
 
-parser.add_argument('--epoch', default=700, type=int, help='epoch number to train')
+parser.add_argument('--epoch', default=500, type=int, help='epoch number to train')
 parser.add_argument('--dataset', default="CIFAR10", type=str, help='dataset name it may be CIFAR10, CIFAR100 or ImageNet')
 parser.add_argument('--imb_factor', default=0.01, type=float, help='long-tailed imbalance factor')
 parser.add_argument('--diffusion_epoch', default=201, type=int, help='diffusion epoch to train')
@@ -45,7 +45,7 @@ parser.add_argument('--training_strategy', default='strategy_a', type=str, choic
                     help='Training strategy to use: original or strategy_a')
 
 # GALD
-parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
+parser.add_argument('--lr', default=0.00010994335574766199, type=float, help='learning rate')
 parser.add_argument('--lambda_ema', default=0.2, type=float, help='EMA decay rate for class prototypes (β_proto)')
 parser.add_argument('--beta_radius', default=0.1, type=float, help='EMA decay rate for class radii (β_radius)')
 parser.add_argument('--eta_p', default=0.1, type=float, help='weight for prototype loss')
@@ -68,20 +68,20 @@ parser.add_argument('--wcdas_traiFalsenable_scale', default=False, type=bool, he
 # Distribution calibration parameters (Section 2.4)
 parser.add_argument('--tau', default=-1, type=int, 
                     help='Head/Tail category sample count threshold (-1=Auto calculation, Positive integer=Manual specification)')
-parser.add_argument('--lambda_cal', default=0.4, type=float, help='Tail radius calibration blending factor (0=pure prior, 1=pure observed)')
+parser.add_argument('--lambda_cal', default=0.6, type=float, help='Tail radius calibration blending factor (0=pure prior, 1=pure observed)')
 
 # Margin constraint parameters 
-parser.add_argument('--eta_m', default=0.25, type=float, help='Margin loss weight')
-parser.add_argument('--margin_m', default=3.5, type=float, help='Margin distance m')
+parser.add_argument('--eta_m', default=0.15000000000000002, type=float, help='Margin loss weight')
+parser.add_argument('--margin_m', default=5.0, type=float, help='Margin distance m')
 
 # Stage 3 training mode parameters
 parser.add_argument('--stage3_mode', default='hybrid', type=str, choices=['stable', 'hybrid'],
                     help="Stage 3 training mode: 'stable'(freeze Encoder) or 'hybrid'(unfreeze Encoder+consistency loss)")
 parser.add_argument('--beta_cons', default=0.1, type=float, help='Consistency loss weight ')
-parser.add_argument('--gamma_pseudo', default=0.8, type=float, help='Pseudo-feature classification loss weight γ (hybrid mode only)')
+parser.add_argument('--gamma_pseudo', default=0.7, type=float, help='Pseudo-feature classification loss weight γ (hybrid mode only)')
 
-parser.add_argument('--stage1_end_epoch', default=100, type=int, help='Stage 1 end epoch (Enc+Cls pre-training)')
-parser.add_argument('--stage2_end_epoch', default=300, type=int, help='Stage 2 end epoch (Diffusion training)')
+parser.add_argument('--stage1_end_epoch', default=70, type=int, help='Stage 1 end epoch (Enc+Cls pre-training)')
+parser.add_argument('--stage2_end_epoch', default=125, type=int, help='Stage 2 end epoch (Diffusion training)')
 
 
 def main():

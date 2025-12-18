@@ -139,22 +139,6 @@ class StrategyATrainer:
             if epoch == self.config.stage1_end_epoch:
                 print(f"\n{'='*60}")
                 print(f"[Stage 1 完成] 计算类统计量并冻结 Encoder...")
-                
-                # ====== CE Baseline 评估 ======
-                print(f"\n[CE Baseline 评估] Stage 1 结束时的纯 CE 训练结果:")
-                test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc = \
-                    self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
-                
-                # 保存 CE Baseline 结果到 monitor
-                self.monitor.ce_baseline_accuracy = accuracy
-                self.monitor.ce_baseline_label_shift_acc = label_shift_acc
-                self.monitor.ce_baseline_mmf = mmf_acc
-                self.monitor.ce_baseline_mmf_pc = mmf_acc_pc
-                
-                print(f"  CE Baseline Accuracy: {100 * accuracy:.2f}%")
-                print(f"  CE Baseline MMF: {mmf_acc}")
-                print(f"  CE Baseline Label Shift Accuracy: {label_shift_acc:.2f}%")
-                
                 with torch.no_grad():
                     # 重新计算更准确的原型和半径（基于完全训练的 encoder）
                     class_prototypes = self._compute_true_class_prototypes(

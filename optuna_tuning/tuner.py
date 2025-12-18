@@ -198,22 +198,30 @@ def create_study(study_name: str = None, resume: bool = False) -> optuna.Study:
     return study
 
 
-def save_results(study: optuna.Study, output_dir: str = None):
+def save_results(study: optuna.Study, output_dir: str = None, 
+                 dataset: str = "CIFAR10", imb_factor: float = 0.01):
     """
     保存优化结果
     
     Args:
         study: Optuna Study 对象
         output_dir: 输出目录
+        dataset: 数据集名称
+        imb_factor: 不平衡因子
     """
     if output_dir is None:
         output_dir = RESULTS_DIR
     
     os.makedirs(output_dir, exist_ok=True)
     
+    # 文件名包含数据集和不平衡因子
+    file_suffix = f"{dataset}_imb{imb_factor}"
+    
     # 1. 保存最佳参数
-    best_params_path = os.path.join(output_dir, 'best_params.json')
+    best_params_path = os.path.join(output_dir, f'best_params_{file_suffix}.json')
     best_result = {
+        'dataset': dataset,
+        'imb_factor': imb_factor,
         'best_value': study.best_value,
         'best_params': study.best_params,
         'best_trial_number': study.best_trial.number,
@@ -227,7 +235,7 @@ def save_results(study: optuna.Study, output_dir: str = None):
     print(f"\n[Optuna] 最佳参数已保存到: {best_params_path}")
     
     # 2. 保存所有试验结果
-    all_trials_path = os.path.join(output_dir, 'all_trials.json')
+    all_trials_path = os.path.join(output_dir, f'all_trials_{file_suffix}.json')
     all_trials = []
     for trial in study.trials:
         trial_data = {
@@ -251,7 +259,7 @@ def save_results(study: optuna.Study, output_dir: str = None):
         
         # 优化历史图
         fig_history = plot_optimization_history(study)
-        history_path = os.path.join(output_dir, 'optimization_history.html')
+        history_path = os.path.join(output_dir, f'optimization_history_{file_suffix}.html')
         fig_history.write_html(history_path)
         print(f"[Optuna] 优化历史图已保存到: {history_path}")
         
@@ -259,7 +267,7 @@ def save_results(study: optuna.Study, output_dir: str = None):
         completed_trials = [t for t in study.trials if t.value is not None]
         if len(completed_trials) >= 10:
             fig_importance = plot_param_importances(study)
-            importance_path = os.path.join(output_dir, 'param_importances.html')
+            importance_path = os.path.join(output_dir, f'param_importances_{file_suffix}.html')
             fig_importance.write_html(importance_path)
             print(f"[Optuna] 参数重要性图已保存到: {importance_path}")
     except ImportError:
@@ -268,8 +276,39 @@ def save_results(study: optuna.Study, output_dir: str = None):
         print(f"[Optuna] 可视化生成失败: {e}")
 
 
+def load_best_params(dataset: str, imb_factor: float, results_dir: str = None) -> dict:
+    """
+    从 JSON 文件加载最佳参数（用于热启动）
+    
+    Args:
+        dataset: 数据集名称
+        imb_factor: 不平衡因子
+        results_dir: 结果目录
+    
+    Returns:
+        dict: 最佳参数字典，如果文件不存在返回 None
+    """
+    if results_dir is None:
+        results_dir = RESULTS_DIR
+    
+    file_suffix = f"{dataset}_imb{imb_factor}"
+    filepath = os.path.join(results_dir, f'best_params_{file_suffix}.json')
+    
+    if not os.path.exists(filepath):
+        print(f"[Optuna] 未找到热启动文件: {filepath}")
+        return None
+    
+    with open(filepath, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    print(f"[Optuna] 已从 {filepath} 加载热启动参数")
+    print(f"  加载的最佳准确率: {100 * data['best_value']:.2f}%")
+    
+    return data['best_params']
+
+
 def run_optuna_study(base_args, n_trials: int = 50, study_name: str = None, 
-                     resume: bool = False) -> optuna.Study:
+                     resume: bool = False, warm_start: bool = False) -> optuna.Study:
     """
     运行 Optuna 超参数优化
     
@@ -278,6 +317,7 @@ def run_optuna_study(base_args, n_trials: int = 50, study_name: str = None,
         n_trials: 试验次数
         study_name: Study 名称
         resume: 是否断点续跑
+        warm_start: 是否使用热启动（从已有最佳参数开始搜索）
     
     Returns:
         optuna.Study: 完成的 Study 对象
@@ -292,6 +332,13 @@ def run_optuna_study(base_args, n_trials: int = 50, study_name: str = None,
     
     # 创建 Study
     study = create_study(study_name=study_name, resume=resume)
+    
+    # 热启动：将已有最佳参数作为第一个试验点
+    if warm_start:
+        warm_params = load_best_params(base_args.dataset, base_args.imb_factor)
+        if warm_params:
+            study.enqueue_trial(warm_params)
+            print(f"[Optuna] 已将热启动参数加入队列")
     
     # 运行优化
     study.optimize(
@@ -315,8 +362,8 @@ def run_optuna_study(base_args, n_trials: int = 50, study_name: str = None,
         for key, value in study.best_params.items():
             print(f"  {key}: {value}")
         
-        # 保存结果
-        save_results(study)
+        # 保存结果（包含数据集和不平衡因子信息）
+        save_results(study, dataset=base_args.dataset, imb_factor=base_args.imb_factor)
     else:
         print("警告: 没有成功完成的试验，无法输出最佳参数")
         print("请检查训练过程中的错误日志")
@@ -333,6 +380,8 @@ def main():
     parser.add_argument('--n_trials', type=int, default=50, help='试验次数')
     parser.add_argument('--study_name', type=str, default=None, help='Study 名称')
     parser.add_argument('--resume', action='store_true', help='断点续跑')
+    parser.add_argument('--warm_start', action='store_true', 
+                        help='热启动：从已保存的最佳参数开始搜索')
     
     # 数据集参数
     parser.add_argument('--datapath', default=r"E:\Projects\LDMLR-main\data", type=str, help='数据集路径')
@@ -359,7 +408,8 @@ def main():
         base_args=base_args,
         n_trials=args.n_trials,
         study_name=args.study_name,
-        resume=args.resume
+        resume=args.resume,
+        warm_start=args.warm_start
     )
     
     return study
