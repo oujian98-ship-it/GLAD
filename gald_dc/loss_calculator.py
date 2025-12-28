@@ -1,4 +1,4 @@
-from cmath import tau
+﻿from cmath import tau
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -118,7 +118,7 @@ class LossCalculator:
         计算真实分类损失，支持多种损失函数
         
         Args:
-            classifier: 分类器模型
+            classifier: 分类头模型
             real_features: 输入特征
             labels: 标签
             class_sample_counts: 每个类别的样本数（用于WCDAS）
@@ -294,17 +294,17 @@ class LossCalculator:
                               x_start: torch.Tensor, t: torch.Tensor, 
                               labels: torch.Tensor) -> torch.Tensor:
         """
-        手动实现扩散损失计算 (修复版)
+        扩散损失计算 (修复版)
         
         修复内容:
         1. 移除归一化逻辑，确保训练和推理分布一致
         2. 统一在此处生成 t 和 noise
-        3. 只加一次噪
         """
+
+
         b, c, n = x_start.shape
         device = x_start.device
         
-        # [修复1] 移除了归一化代码块
         
         # 1. 生成时间步 t (如果未传入)
         if t is None:
@@ -347,7 +347,7 @@ class LossCalculator:
     
     def compute_prototype_loss(self, estimated_clean_features: torch.Tensor, 
                              labels: torch.Tensor, 
-                             class_prototypes: Dict[int, torch.Tensor],
+                             class_mu: Dict[int, torch.Tensor],
                              num_classes: int) -> torch.Tensor:
         """
         计算原型拉拢损失（增强数值稳定性）
@@ -372,16 +372,15 @@ class LossCalculator:
             cls_idx = labels[i].item()
             if 0 <= cls_idx < num_classes:
                 # 检查原型中心的数值稳定性
-                if torch.isnan(class_prototypes[cls_idx]).any() or torch.isinf(class_prototypes[cls_idx]).any():
+                if torch.isnan(class_mu[cls_idx]).any() or torch.isinf(class_mu[cls_idx]).any():
                     continue
                 
                 # 裁剪原型中心，防止数值爆炸
-                clamped_prototype = torch.clamp(class_prototypes[cls_idx].detach(),
+                proto = torch.clamp(class_mu[cls_idx].detach(),
                                               min=-self.config.feature_clamp_max,
                                               max=self.config.feature_clamp_max)
                 
-                # 允许梯度流向diffusion model，优化特征生成质量
-                loss_item = F.mse_loss(estimated_clean_features[i], clamped_prototype)
+                loss_item = F.mse_loss(estimated_clean_features[i], proto)
                 
                 # 检查损失项的数值稳定性
                 if not torch.isnan(loss_item) and not torch.isinf(loss_item):
@@ -390,7 +389,7 @@ class LossCalculator:
                     prototype_loss += loss_item
                     valid_samples += 1
         
-        prototype_loss = prototype_loss / valid_samples if valid_samples > 0 else torch.tensor(0.0, device=device)
+        prototype_loss = prototype_loss / valid_samples if valid_samples > 0 else torch.tensor(0.0, device=device) #计算平均损失，并防止除以零的错误。
         
         # 限制原型损失的最大值
         prototype_loss = torch.clamp(prototype_loss, max=5.0)
@@ -399,8 +398,8 @@ class LossCalculator:
     
     def compute_radius_constraint_loss(self, estimated_clean_features: torch.Tensor, 
                                      labels: torch.Tensor, 
-                                     class_prototypes: Dict[int, torch.Tensor],
-                                     target_radii: List[torch.Tensor],
+                                     class_mu: Dict[int, torch.Tensor],
+                                     r_obs: List[torch.Tensor],
                                      num_classes: int) -> torch.Tensor:
         """
         计算等半径约束损失（替换协方差匹配）
@@ -434,38 +433,40 @@ class LossCalculator:
             if 0 <= cls_idx < num_classes:
                 # 获取当前特征和对应的类中心
                 feature = estimated_clean_features[i]
-                cls_prototype = class_prototypes[cls_idx]
+                proto = class_mu[cls_idx]
                 
                 # 检查特征数值稳定性
                 if torch.isnan(feature).any() or torch.isinf(feature).any():
                     continue
                 
                 # 检查原型中心的数值稳定性
-                if torch.isnan(cls_prototype).any() or torch.isinf(cls_prototype).any():
+                if torch.isnan(proto).any() or torch.isinf(proto).any():
                     continue
                 
                 # 计算特征到类中心的欧几里得距离 ||~z_0 - μ_y||_2
-                distance = torch.norm(feature - cls_prototype, p=2)
+                distance = torch.norm(feature - proto, p=2)
                 
                 # 获取目标半径 r_y
-                if cls_idx < len(target_radii):
-                    target_radius = target_radii[cls_idx]
+                if cls_idx < len(r_obs):
+                    target_radius = r_obs[cls_idx]
                     # 确保目标半径在正确的设备上
                     if target_radius.device != device:
                         target_radius = target_radius.to(device)
                 else:
                     # 如果没有预设目标，计算有样本类别的平均半径作为默认值
-                    if torch.any(target_radii > 0):  # 有实际计算的半径值
-                        mask = target_radii > 0
-                        avg_radius = target_radii[mask].mean()
+                    if torch.any(r_obs > 0):  # 有实际计算的半径值
+                        mask = r_obs > 0
+                        avg_radius = r_obs[mask].mean()
                         target_radius = avg_radius.to(device)
                     else:
                         # 极端情况：所有类别都没有预设半径，使用配置中的默认值
                         target_radius = torch.tensor(self.config.target_radius, device=device)
                 
-                # 计算半径约束损失：(distance - target_radius)^2
-                # 允许梯度流向diffusion model，优化几何约束
-                loss_item = (distance - target_radius) ** 2
+                # [R2 修复] 使用 Hinge Loss 替代 MSE，允许缓冲区
+                # 原公式: L_rad = (distance - r)²  (过于严格，损害各向异性)
+                # 新公式: L_rad = max(0, |distance - r| - δ)  (允许 [r-δ, r+δ] 范围)
+                delta = getattr(self.config, 'radius_slack', 0.5)  # 缓冲区宽度
+                loss_item = F.relu(torch.abs(distance - target_radius) - delta)
                 
                 # 检查损失项的数值稳定性
                 if not torch.isnan(loss_item) and not torch.isinf(loss_item):
@@ -473,7 +474,7 @@ class LossCalculator:
                     valid_samples += 1
         
         # 计算平均损失 E[(||~z_0 - μ_y||_2 - r_y)^2]
-        radius_loss = radius_loss / valid_samples if valid_samples > 0 else torch.tensor(0.0, device=device)
+        radius_loss = radius_loss / valid_samples if valid_samples > 0 else torch.tensor(0.0, device=device) #计算平均损失，并防止除以零的错误。
         radius_loss = torch.clamp(radius_loss, max=self.config.max_radius_loss)
         
         return radius_loss
@@ -500,7 +501,7 @@ class LossCalculator:
     # ==================== GALD-DC 增强功能 ====================
     
     def compute_margin_loss(self, estimated_clean: torch.Tensor, labels: torch.Tensor,
-                           class_prototypes: Dict[int, torch.Tensor], 
+                           class_mu: Dict[int, torch.Tensor], 
                            num_classes: int, margin: float) -> torch.Tensor:
         """
         计算判别边距约束损失 (GALD-DC Section 2.6)
@@ -526,8 +527,8 @@ class LossCalculator:
         valid_prototypes = torch.zeros(num_classes, dtype=torch.bool, device=device)
         
         for cls_idx in range(num_classes):
-            if cls_idx in class_prototypes:
-                proto = class_prototypes[cls_idx]
+            if cls_idx in class_mu:
+                proto = class_mu[cls_idx]
                 if not (torch.isnan(proto).any() or torch.isinf(proto).any()):
                     prototype_matrix[cls_idx] = proto.to(device)
                     valid_prototypes[cls_idx] = True
@@ -558,10 +559,18 @@ class LossCalculator:
                 continue
             
             neg_dists = dists[i, neg_mask]
-            min_neg_dist = neg_dists.min()  # 保持梯度！
             
-            # L_margin = max(0, m + dist_to_pos - dist_to_neg)
-            loss_item = F.relu(margin + dist_to_pos - min_neg_dist)
+            # [R4 修复] Top-K Soft Margin: 对 K 个最近负类取平均，平滑梯度
+            # 原问题: 只用单个最近负类导致 y⁻ 频繁切换，梯度震荡
+            top_k = getattr(self.config, 'margin_top_k', 3)
+            actual_k = min(top_k, neg_dists.size(0))  # 防止 K 超过可用负类数
+            
+            # 获取 Top-K 最近负类距离 (smallest K distances)
+            top_k_neg_dists, _ = neg_dists.topk(actual_k, largest=False)
+            
+            # 对每个负类计算 margin loss 并取平均
+            loss_items = F.relu(margin + dist_to_pos - top_k_neg_dists)
+            loss_item = loss_items.mean()
             
             if not (torch.isnan(loss_item) or torch.isinf(loss_item)):
                 margin_losses.append(loss_item)
@@ -594,11 +603,11 @@ class LossCalculator:
             lambda_cal: 校准混合因子
             
         Returns:
-            calibrated_radii: 校准后的半径 [num_classes]
+            r_cal: 校准后的半径 [num_classes]
         """
         device = observed_radii.device
         num_classes = observed_radii.size(0)
-        calibrated_radii = observed_radii.clone()
+        r_cal = observed_radii.clone()
         
         # 识别头部类和尾部类
         head_mask = class_counts >= tau  # C_head
@@ -606,12 +615,12 @@ class LossCalculator:
         
         # 头部类: 直接使用观测半径
         # 尾部类: 混合校准
-        calibrated_radii[tail_mask] = (
+        r_cal[tail_mask] = (
             lambda_cal * observed_radii[tail_mask] + 
             (1 - lambda_cal) * r_prior
         )
         
-        return calibrated_radii
+        return r_cal
     
     def compute_head_class_prior(self, observed_radii: torch.Tensor, 
                                  class_counts: torch.Tensor, tau: int) -> float:

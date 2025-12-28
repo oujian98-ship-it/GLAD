@@ -2,12 +2,11 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
-from strategy_a import train_strategy_a
+from gald_dc import train_gald_dc
 
 
 def main(args):
-    
-    return train_strategy_a(args)
+    return train_gald_dc(args)
 
 
 if __name__ == '__main__':

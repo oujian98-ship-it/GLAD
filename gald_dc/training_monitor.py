@@ -44,7 +44,7 @@ class TrainingMonitor:
         # 确保 logs 目录存在
         os.makedirs(logs_dir, exist_ok=True)
         
-        log_filename = os.path.join(logs_dir, f"{self.config.dataset}_strategy_A_{self.config.imb_factor}_{current_time}.log")
+        log_filename = os.path.join(logs_dir, f"{self.config.dataset}_{self.config.imb_factor}_{current_time}.log")
         logging.basicConfig(
             filename=log_filename, 
             level=logging.INFO,
@@ -137,14 +137,14 @@ class TrainingMonitor:
         method_display = f"{method_name} " if method_name == "CE" else method_name
         print(f"{method_display} Results:")
         print(f"  Test Loss:       {test_loss:.4f}")
-        print(f"  Accuracy:        {100 * accuracy:.2f}%")
+        print(f"  Test Acc:        {100 * accuracy:.2f}%")
         print(f"  MMF Acc:         {mmf_acc}")
 
         # Label Shift补偿结果
         # 注意：label_shift_acc 已经是百分比形式（由acc_cal返回），不需要再乘100
         improvement = label_shift_acc - (accuracy * 100)  # 将accuracy转为百分比后计算改进
         print(f"Label Shift Results:")
-        print(f"  Accuracy:        {label_shift_acc:.2f}% ")
+        print(f"  Test Acc:        {label_shift_acc:.2f}% ")
         print(f"  MMF Acc:         {mmf_acc_pc}\n")
         
         

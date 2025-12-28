@@ -16,11 +16,11 @@ from typing import Optional, Dict, Any
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from strategy_a.trainer import StrategyATrainer
-from strategy_a.config import TrainingConfig
+from gald_dc.trainer import GALDDCTrainer
+from gald_dc.config import TrainingConfig
 
 
-class OptunaStrategyATrainer(StrategyATrainer):
+class OptunaStrategyATrainer(GALDDCTrainer):
     """
     支持 Optuna 超参数优化的训练器
     

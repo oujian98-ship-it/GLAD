@@ -20,18 +20,18 @@ from utilis.diffusion_model_colab import diffusion_train_colab
 from utilis.test_ft import test_ft
 from fine_tune_tr import fine_tune_fc
 from eval import evaluation
-from train_strategy_a import train_strategy_a
+from train_gald_dc import main as train_gald_dc
 
 
 parser = argparse.ArgumentParser(description='Long-Tailed Diffusion Model training   ----Author: Pengxiao Han')
-parser.add_argument('--datapath', default=r"E:\Projects\LDMLR-main\data", type=str, help='dataset path')
+parser.add_argument('--datapath', default="./data", type=str, help='dataset path')
 parser.add_argument('--config', default="./config/cifar10/cifar10_LSC_Mixup.txt", help='path to config file')
 
-parser.add_argument('--epoch', default=500, type=int, help='epoch number to train')
-parser.add_argument('--dataset', default="CIFAR10", type=str, help='dataset name it may be CIFAR10, CIFAR100 or ImageNet')
-parser.add_argument('--imb_factor', default=0.01, type=float, help='long-tailed imbalance factor')
+parser.add_argument('--epoch', default=400, type=int, help='epoch number to train')
+parser.add_argument('--dataset', default="CIFAR100", type=str, help='dataset name it may be CIFAR10, CIFAR100 or ImageNet')
+parser.add_argument('--imb_factor', default=0.1, type=float, help='long-tailed imbalance factor')
 parser.add_argument('--diffusion_epoch', default=201, type=int, help='diffusion epoch to train')
-parser.add_argument('--model_fixed', default='./pretrained_models/resnet32_cifar10_lt001.checkpoint', type=str, help='the encoder model path')
+parser.add_argument('--model_fixed', default='./pretrained_models/resnet32_cifar100_lt001.checkpoint', type=str, help='the encoder model path')
 parser.add_argument('--feature_ratio', default=0.20, type=float, help='The ratio of generating feature')
 parser.add_argument('--diffusion_step', default=1000, type=int, help='The steps of diffusion')
 parser.add_argument('--checkpoint', default=None, type=str, help='model path to resume previous training, default None')
@@ -41,19 +41,19 @@ parser.add_argument('--eval', default=None, type=str, help='evaluate the model p
 parser.add_argument('--is_diffusion_pretrained', default = None, help='pre-trained diffusion model path. Training from scratch if None')
 parser.add_argument('--generation_mmf', default=None, type=str, help='CNN fully connected layer batch size')
 
-parser.add_argument('--training_strategy', default='strategy_a', type=str, choices=['original', 'strategy_a'], 
-                    help='Training strategy to use: original or strategy_a')
+parser.add_argument('--training_strategy', default='gald_dc', type=str, choices=['original', 'gald_dc'], 
+                    help='Training strategy to use: original or gald_dc')
 
 # GALD
-parser.add_argument('--lr', default=0.00010994335574766199, type=float, help='learning rate')
+parser.add_argument('--lr', default=0.002, type=float, help='learning rate')
 parser.add_argument('--lambda_ema', default=0.2, type=float, help='EMA decay rate for class prototypes (β_proto)')
 parser.add_argument('--beta_radius', default=0.1, type=float, help='EMA decay rate for class radii (β_radius)')
-parser.add_argument('--eta_p', default=0.1, type=float, help='weight for prototype loss')
-parser.add_argument('--eta_r', default=0.2, type=float, help='weight for radius constraint loss (previously covariance loss)')
+parser.add_argument('--eta_p', default=0.15, type=float, help='weight for prototype loss')
+parser.add_argument('--eta_r', default=0.1, type=float, help='weight for radius constraint loss (previously covariance loss)')
 parser.add_argument('--lambda_sem', default=0.01, type=float, help='weight for semantic loss')
 parser.add_argument('--gamma_ge', default=0.15, type=float, help='weight for generation loss')
 parser.add_argument('--warmup_epochs', default=30, type=int, help='warmup epochs for semantic loss')
-parser.add_argument('--generation_interval', default=10, type=int, help='generation interval for fake features')
+parser.add_argument('--generation_interval', default=5, type=int, help='generation interval for fake features')
 parser.add_argument('--ddim_steps', default=100, type=int, help='DDIM sampling steps')
 
 # Equal radius constraint parameter
@@ -63,25 +63,29 @@ parser.add_argument('--target_radius', default=1.0, type=float, help='default ta
 # WCDAS parameter
 parser.add_argument('--use_wcdas', default=False, type=bool, help='whether to use WCDAS for accuracy calculation') #WCDAS是否参与准确率计算，false时使用CE
 parser.add_argument('--wcdas_gamma', default=0, type=float, help='initial gamma parameter for WCDAS')
-parser.add_argument('--wcdas_traiFalsenable_scale', default=False, type=bool, help='whether the scale parameter in WCDAS is trainable')
+parser.add_argument('--wcdas_trainable_scale', default=False, type=bool, help='whether the scale parameter in WCDAS is trainable')
 
 # Distribution calibration parameters (Section 2.4)
 parser.add_argument('--tau', default=-1, type=int, 
                     help='Head/Tail category sample count threshold (-1=Auto calculation, Positive integer=Manual specification)')
-parser.add_argument('--lambda_cal', default=0.6, type=float, help='Tail radius calibration blending factor (0=pure prior, 1=pure observed)')
+parser.add_argument('--lambda_cal', default=0.1, type=float, help='Tail radius calibration blending factor (0=pure prior, 1=pure observed)')
 
 # Margin constraint parameters 
-parser.add_argument('--eta_m', default=0.15000000000000002, type=float, help='Margin loss weight')
-parser.add_argument('--margin_m', default=5.0, type=float, help='Margin distance m')
+parser.add_argument('--eta_m', default=0.3, type=float, help='Margin loss weight')
+parser.add_argument('--margin_m', default=3.5, type=float, help='Margin distance m')
 
 # Stage 3 training mode parameters
 parser.add_argument('--stage3_mode', default='hybrid', type=str, choices=['stable', 'hybrid'],
                     help="Stage 3 training mode: 'stable'(freeze Encoder) or 'hybrid'(unfreeze Encoder+consistency loss)")
-parser.add_argument('--beta_cons', default=0.1, type=float, help='Consistency loss weight ')
-parser.add_argument('--gamma_pseudo', default=0.7, type=float, help='Pseudo-feature classification loss weight γ (hybrid mode only)')
+parser.add_argument('--beta_cons', default=0.15, type=float, help='Consistency loss weight ')
+parser.add_argument('--gamma_pseudo', default=0.6, type=float, help='Pseudo-feature classification loss weight γ (hybrid mode only)')
 
-parser.add_argument('--stage1_end_epoch', default=70, type=int, help='Stage 1 end epoch (Enc+Cls pre-training)')
-parser.add_argument('--stage2_end_epoch', default=125, type=int, help='Stage 2 end epoch (Diffusion training)')
+parser.add_argument('--stage1_end_epoch', default=200, type=int, help='Stage 1 end epoch (Enc+Cls pre-training)')
+parser.add_argument('--stage2_end_epoch', default=250, type=int, help='Stage 2 end epoch (Diffusion training)')
+
+# Stage 3 Explicit Calibration
+parser.add_argument('--enable_stage3_calibration', default=True, type=bool, help='Enable Stage 3 explicit calibration')
+parser.add_argument('--stage3_calibration_strength', default=0.5, type=float, help='Stage 3 calibration strength (0.0-1.0)')
 
 
 def main():
@@ -90,7 +94,7 @@ def main():
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     logs_dir = "./logs"
-    log_filename = os.path.join(logs_dir, args.dataset + '_' + args.dataset + '_' +  str(args.imb_factor) + f"_{current_time}.log")
+    log_filename = os.path.join(logs_dir, f"{args.dataset}_{args.imb_factor}_{current_time}.log")
     logging.basicConfig(filename=log_filename, level=logging.INFO)
     
     
@@ -114,9 +118,9 @@ def main():
         exit()
 
     # Select different training processes based on the training strategy
-    if args.training_strategy == 'strategy_a':
-        print("Using training strategy A: Synchronous joint training")
-        train_strategy_a(args)
+    if args.training_strategy == 'gald_dc':
+        print("Using training strategy: GALD-DC (Synchronous joint training)")
+        train_gald_dc(args)
     else:
         print("Use the original training strategy: phased training")
         # 1. Encoder - encode images into features (batch_size, feature_dim) --------------------------------------------------------

@@ -10,14 +10,6 @@ from typing import Dict, Any
 
 # 搜索空间配置
 SEARCH_SPACE_CONFIG = {
-    # 学习率 (对数尺度)
-    'lr': {
-        'type': 'log_float',
-        'low': 1e-4,
-        'high': 1e-2,
-        'description': '学习率'
-    },
-    
     # 判别边距参数
     'margin_m': {
         'type': 'float',
@@ -97,6 +89,44 @@ SEARCH_SPACE_CONFIG = {
         'high': 200,
         'step': 25,
         'description': 'Stage 2 (Diffusion训练) 结束轮数'
+    },
+    
+    # ==================== R2/R3/R4/R6 修复参数 ====================
+    
+    # R2: Hinge Loss 缓冲区
+    'radius_slack': {
+        'type': 'float',
+        'low': 0.2,
+        'high': 1.0,
+        'step': 0.1,
+        'description': 'Hinge Loss 半径缓冲区 δ (越大越宽松)'
+    },
+    
+    # R3: EMA 冷启动保护期
+    'ema_warmup_epochs': {
+        'type': 'int',
+        'low': 3,
+        'high': 15,
+        'step': 2,
+        'description': 'Stage 2 中 EMA 冻结的 epoch 数'
+    },
+    
+    # R4: Top-K 负类数量
+    'margin_top_k': {
+        'type': 'int',
+        'low': 1,
+        'high': 5,
+        'step': 1,
+        'description': 'Margin Loss 中使用的 Top-K 负类数量'
+    },
+    
+    # R6: LoRA 秩
+    'lora_rank': {
+        'type': 'int',
+        'low': 2,
+        'high': 8,
+        'step': 2,
+        'description': 'LoRA 低秩适配的秩 (越小越轻量)'
     },
 }
 

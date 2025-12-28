@@ -22,7 +22,7 @@ class TrainingConfig:
         self.lr = args.lr                       
         self.lambda_ema = args.lambda_ema       
         self.eta_p = args.eta_p               
-        self.eta_r = args.eta_r               # 原协方差权重，现用于等半径约束
+        self.eta_r = args.eta_r               # 现用于等半径约束
         self.lambda_sem = args.lambda_sem      
         self.gamma_ge = args.gamma_ge         
         self.warmup_epochs = args.warmup_epochs  
@@ -30,51 +30,44 @@ class TrainingConfig:
         self.ddim_steps = args.ddim_steps
         
         # 等半径约束参数
-        self.use_radius_constraint = getattr(args, 'use_radius_constraint', True)  # 是否使用等半径约束
-        self.target_radius = getattr(args, 'target_radius', 1.0)  # 默认目标半径值（用于没有样本的类别）
+        self.use_radius_constraint = args.use_radius_constraint  # 是否使用等半径约束
+        self.target_radius = args.target_radius  # 默认目标半径值（用于没有样本的类别）
         
-        # 学习率调度参数
-        self.use_lr_scheduler = getattr(args, 'use_lr_scheduler', True)  # 是否使用学习率调度器
-        self.lr_scheduler_type = getattr(args, 'lr_scheduler_type', 'cosine')  # 学习率调度器类型 ('cosine', 'step', 'multistep')
-        self.lr_min_ratio = getattr(args, 'lr_min_ratio', 0.01)  # 最小学习率与初始学习率的比率
-        self.lr_milestones = getattr(args, 'lr_milestones', [150, 250])  # 多步衰减的里程碑 (仅在多步衰减时使用)
-        self.lr_gamma = getattr(args, 'lr_gamma', 0.1)  # 学习率衰减因子 (仅在步进衰减时使用)
-        self.lr_warmup_epochs = getattr(args, 'lr_warmup_epochs', 10)  # 学习率预热轮数
         
         # WCDAS相关参数
-        self.use_wcdas = getattr(args, 'use_wcdas', False)  # 是否使用WCDAS损失函数
-        self.wcdas_gamma = getattr(args, 'wcdas_gamma', -1)  # WCDAS的初始gamma参数
-        self.wcdas_trainable_scale = getattr(args, 'wcdas_traiFalsenable_scale', False)  # WCDAS的缩放参数是否可训练
+        self.use_wcdas = args.use_wcdas  # 是否使用WCDAS损失函数
+        self.wcdas_gamma = args.wcdas_gamma  # WCDAS的初始gamma参数
+        self.wcdas_trainable_scale =args.wcdas_trainable_scale  # WCDAS的缩放参数是否可训练
         
         # ==================== GALD-DC 增强参数 ====================
         # 分布校准参数 (Section 2.4)
-        self.tau = getattr(args, 'tau', -1)  # 头部/尾部类别样本数阈值 (-1=自动计算)
-        self.lambda_cal = getattr(args, 'lambda_cal', 0.5)  # 尾部类半径校准混合因子 λ
-        self.beta_radius = getattr(args, 'beta_radius', 0.1)  # 半径 EMA 更新速率 β_r
+        self.tau = args.tau  # 头部/尾部类别样本数阈值 (-1=自动计算)
+        self.lambda_cal = args.lambda_cal  # 尾部类半径校准混合因子 λ
+        self.beta_radius = args.beta_radius  # 半径 EMA 更新速率 β_r
         
         # 判别边距约束参数 (Section 2.6)
-        self.eta_m = getattr(args, 'eta_m', 0.1)  # 边距损失权重
-        self.margin_m = getattr(args, 'margin_m', 2.0)  # 边距距离 m
+        self.eta_m = args.eta_m  # 边距损失权重
+        self.margin_m = args.margin_m  # 边距距离 m
         
         # Stage 3 训练模式参数
-        self.stage3_mode = getattr(args, 'stage3_mode', 'hybrid')  # 'stable' 或 'hybrid'
-        self.beta_cons = getattr(args, 'beta_cons', 0.1)  # 一致性损失权重 (仅hybrid模式)
-        self.gamma_pseudo = getattr(args, 'gamma_pseudo', 0.8)  # 伪特征分类损失权重
+        self.stage3_mode = args.stage3_mode  # 'stable' 或 'hybrid'
+        self.beta_cons = args.beta_cons  # 一致性损失权重 (仅hybrid模式)
+        self.gamma_pseudo = args.gamma_pseudo  # 伪特征分类损失权重
         
         # 三阶段分离训练配置
-        self.stage1_end_epoch = getattr(args, 'stage1_end_epoch', 100)  # Stage 1 结束 epoch
-        self.stage2_end_epoch = getattr(args, 'stage2_end_epoch', 300)  # Stage 2 结束 epoch
+        self.stage1_end_epoch = args.stage1_end_epoch  # Stage 1 结束 epoch
+        self.stage2_end_epoch = args.stage2_end_epoch  # Stage 2 结束 epoch
         
         # 数值稳定性参数 - 防止训练过程中的数值问题
         self.max_loss_weight = 5.0              
         self.max_diffusion_loss = 10.0            
         self.max_cov_loss = 5.0                  # 保留用于兼容性
         self.max_radius_loss = 50.0              # 等半径约束损失的最大值 (放宽以允许梯度传播)
-        self.max_semantic_loss = 20.0           
+        self.max_L_semantic = 20.0           
         self.max_grad_norm = 0.9                  
                 
         # 梯度控制参数
-        self.max_gen_loss = 50.0                  
+        self.max_L_ge = 50.0                  
         self.feature_clamp_min = -10.0           
         self.feature_clamp_max = 10.0            
 
@@ -91,6 +84,20 @@ class TrainingConfig:
         # Stage 3伪特征显式校准机制
         self.enable_stage3_calibration = getattr(args, 'enable_stage3_calibration', True)  # 是否启用Stage 3校准
         self.stage3_calibration_strength = getattr(args, 'stage3_calibration_strength', 0.5)  # 校准强度 (0.0-1.0)
+        
+        # ==================== R2/R3 风险修复参数 ====================
+        # R2: Hinge Loss 宽松半径约束 (允许缓冲区，避免球形假设过于严格)
+        self.radius_slack = getattr(args, 'radius_slack', 0.5)  # Hinge Loss 缓冲区 δ
+        # R3: EMA 冷启动保护 (Stage 2 前 N epochs 冻结 EMA 更新)
+        self.ema_warmup_epochs = getattr(args, 'ema_warmup_epochs', 10)  # EMA 冻结期
+        
+        # ==================== R4/R6 风险修复参数 ====================
+        # R4: Top-K Soft Margin (对 K 个最近负类取平均，避免梯度震荡)
+        self.margin_top_k = getattr(args, 'margin_top_k', 3)  # Top-K 负类数量
+        # R6: LoRA 适配 (允许 DM 轻量级跟踪 Encoder 特征空间漂移)
+        self.enable_lora = getattr(args, 'enable_lora', True)  # 是否启用 LoRA
+        self.lora_rank = getattr(args, 'lora_rank', 4)  # LoRA 秩 (越小越轻量)
+        self.lora_alpha = getattr(args, 'lora_alpha', 8.0)  # LoRA 缩放因子
     
     def to_dict(self) -> Dict:
         """将配置转换为字典格式"""

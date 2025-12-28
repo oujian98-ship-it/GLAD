@@ -13,8 +13,8 @@ try:
     from model.ddpm_conditional import UNet_conditional, ConditionalDiffusion1D
     DDPM_AVAILABLE = True
 except ImportError as e:
-    print(f"警告: 无法导入DDPM模块: {e}")
-    print("这可能是由于缺少ema_pytorch依赖或其他模块路径问题")
+    print(f"Warning: Failed to import DDPM module: {e}")
+    print("This may be due to missing ema_pytorch dependency or other module path issues")
     DDPM_AVAILABLE = False
     
     # 提供简单的替代实现
@@ -71,6 +71,9 @@ class SimpleClassifier(nn.Module):
     def __init__(self, feature_dim: int, num_classes: int):
         """
         初始化分类器
+        Args:
+            feature_dim: 特征维度
+            num_classes: 类别数
         """
         super(SimpleClassifier, self).__init__()
         self.fc = nn.Linear(feature_dim, num_classes)
@@ -127,7 +130,7 @@ class ModelManager:
         else:
             # 使用标准分类器
             classifier = SimpleClassifier(feature_dim, num_classes)
-            print("Using standard classifier for training")
+            print(f"Using standard classifier for training")
         
         classifier.to(self.device)
         
@@ -161,8 +164,8 @@ class ModelManager:
             in_features=feature_dim,
             out_features=num_classes,
             bias=False,
-            gamma=self.config.wcdas_gamma,  # 使用配置中的参数
-            s_trainable=self.config.wcdas_trainable_scale  # 使用配置中的参数
+            gamma=self.config.wcdas_gamma,
+            s_trainable=self.config.wcdas_trainable_scale
         )
         wcdas_classifier.to(self.device)
         
@@ -254,9 +257,8 @@ class ModelManager:
         保存扩散模型到pretrained_models文件夹
         """
         # 创建保存路径，格式为diffusion_model_CIFAR10_imb_1_epoch_x.pt
-        model_path = f"./pretrained_models/diffusion_model_{self.config.dataset}_imb_1_epoch_{epoch}.pt"
+        model_path = f"./pretrained_models/diffusion_model_{self.config.dataset}_imb_{self.config.imb_factor}.pt"
         
         # 保存模型状态字典
         torch.save(diffusion_model.state_dict(), model_path)
         print(f"The diffusion model has been saved to: {model_path}")
-        

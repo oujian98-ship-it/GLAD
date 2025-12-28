@@ -171,9 +171,9 @@ def load_data(dataset_name, datapath, data_transforms, imb_factor):
                                                                       imb_factor=imb_factor)
 
     # ---------------------Create Batch Dataloader------------------------------#
-    train_set = DataLoader(train_dataset, batch_size=64,shuffle=True)
-    val_set = DataLoader(val_dataset, batch_size=64,shuffle = False)
-    test_set = DataLoader(test_dataset, batch_size=64,shuffle = False)
+    train_set = DataLoader(train_dataset, batch_size=1024, shuffle=True)
+    val_set = DataLoader(val_dataset, batch_size=1024, shuffle=False)
+    test_set = DataLoader(test_dataset, batch_size=1024, shuffle=False)
 
     return train_set, val_set, test_set, dset_info
 

@@ -25,7 +25,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from optuna_tuning.search_space import define_search_space, get_search_space_summary
 from optuna_tuning.optuna_trainer import OptunaStrategyATrainer
-from strategy_a.config import TrainingConfig
+from gald_dc.config import TrainingConfig
 
 
 # Optuna 模块目录
@@ -58,27 +58,27 @@ def get_base_args(args):
     base.warmup_epochs = args.warmup_epochs
     
     # 默认超参数 (会被 Optuna 覆盖)
-    base.lr = 0.001
+    base.lr = 0.0003
     base.lambda_ema = 0.2
     base.beta_radius = 0.1
     base.eta_p = 0.1
     base.eta_r = 0.2
-    base.eta_m = 0.25
+    base.eta_m = 0.15
     base.lambda_sem = 0.01
     base.gamma_ge = 0.15
     base.tau = -1
-    base.lambda_cal = 0.4
-    base.margin_m = 3.5
+    base.lambda_cal = 0.6
+    base.margin_m = 5.0
     base.stage3_mode = 'hybrid'
     base.beta_cons = 0.1
-    base.gamma_pseudo = 0.8
-    base.stage1_end_epoch = 100
-    base.stage2_end_epoch = 300
+    base.gamma_pseudo = 0.7
+    base.stage1_end_epoch = 70
+    base.stage2_end_epoch = 125
     
     # 其他配置
     base.use_wcdas = False
     base.wcdas_gamma = 0
-    base.wcdas_traiFalsenable_scale = False
+    base.wcdas_trainable_scale = False
     base.use_radius_constraint = True
     base.target_radius = 1.0
     base.enable_stage3_calibration = True
