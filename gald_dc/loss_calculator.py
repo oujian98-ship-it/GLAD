@@ -127,7 +127,7 @@ class LossCalculator:
         if loss_type == 'ce':
             # 标准交叉熵损失 + Label Smoothing (减少过拟合)
             real_logits = classifier(real_features)
-            return F.cross_entropy(real_logits, labels, label_smoothing=0.1)
+            return F.cross_entropy(real_logits, labels, label_smoothing=0)
         elif loss_type == 'wcdas':
             # WCDAS损失函数，需要class_sample_counts
             if class_sample_counts is None:

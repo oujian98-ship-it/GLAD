@@ -75,13 +75,11 @@ class TrainingMonitor:
         记录轮次总结 (根据阶段显示不同内容)
         """
         if stage == 1:
-            # Stage 1: 只输出 CE 损失
             msg = f" Epoch {epoch} - CE Loss: {avg_losses['real']:.4f}"
             print(msg)
             logging.info(msg)
             
         elif stage == 2:
-            # Stage 2: 输出详细的扩散和几何损失
             msg = (f"Epoch {epoch} - "
                    f"L_LDM: {avg_losses.get('diffusion', 0):.4f}, "
                    f"L_proto: {avg_losses.get('prototype', 0):.4f}, "
@@ -91,8 +89,7 @@ class TrainingMonitor:
             print(msg)
             logging.info(msg)
             
-        else:  # stage == 3
-            # Stage 3: 完整输出
+        else: 
             if train_loss is not None and train_accuracy is not None:
                 logging.info("cnn training loss is {}; cnn training accuracy is {:.2f}".format(
                     train_loss, train_accuracy * 100))
@@ -109,59 +106,51 @@ class TrainingMonitor:
     
     def log_validation(self, epoch: int, accuracy: float, test_loss: float, 
                       label_shift_acc: float, mmf_acc: List, mmf_acc_pc: List, 
-                      wcdas_accuracy: float = 0.0):
+                      wcdas_accuracy: float = 0.0, mode: str = 'Val'):
         """
-        记录验证结果 - 清晰区分主方法和Label Shift结果
+        按照用户喜好的格式记录验证结果 (垂直排列)
         """
-        # 确定当前使用的主方法
         method_name = "WCDAS" if self.config.use_wcdas else "CE"
+        method_display = f"{method_name} " if method_name == "CE" else method_name
+        set_name = "Validation" if mode == 'Val' else "Test"
         
-        # 保存当前epoch的准确率到历史记录
+        # 保存历史记录 (记录所有验证/测试点)
         self.accuracies_history.append({
             'epoch': epoch,
+            'mode': mode,
             'method': method_name,
             'base_accuracy': accuracy,
+            'accuracy': accuracy,
             'label_shift_acc': label_shift_acc,
             'base_mmf': mmf_acc,
-            'label_shift_mmf': mmf_acc_pc,
-            # 保留旧字段以兼容旧代码
-            'accuracy': accuracy,
             'mmf_acc': mmf_acc,
-            'mmf_acc_pc': mmf_acc_pc,
-            'wcdas_accuracy': wcdas_accuracy
+            'label_shift_mmf': mmf_acc_pc,
+            'mmf_acc_pc': mmf_acc_pc
         })
         
-        # 输出分隔线
-        print(f"Epoch {epoch} Validation Results")
-        # 主方法结果 - 使用 "Ours" 后缀表示包含 GALD-DC 增强
-        method_display = f"{method_name} " if method_name == "CE" else method_name
+        # 终端输出 (还原为用户熟悉的垂直样式)
+        print(f"Epoch {epoch} {set_name} Results")
         print(f"{method_display} Results:")
-        print(f"  Test Loss:       {test_loss:.4f}")
-        print(f"  Test Acc:        {100 * accuracy:.2f}%")
+        print(f"  {set_name} Loss:       {test_loss:.4f}")
+        print(f"  {set_name} Acc:        {100 * accuracy:.2f}%")
         print(f"  MMF Acc:         {mmf_acc}")
-
-        # Label Shift补偿结果
-        # 注意：label_shift_acc 已经是百分比形式（由acc_cal返回），不需要再乘100
-        improvement = label_shift_acc - (accuracy * 100)  # 将accuracy转为百分比后计算改进
+        
         print(f"Label Shift Results:")
-        print(f"  Test Acc:        {label_shift_acc:.2f}% ")
+        print(f"  {set_name} Acc:        {label_shift_acc:.2f}%")
         print(f"  MMF Acc:         {mmf_acc_pc}\n")
         
-        
-        # 记录到日志文件
-        logging.info(f"Epoch {epoch} - Method: {method_display}")
-        logging.info(f"  {method_display} Accuracy: {100 * accuracy:.2f}%, Test Loss: {test_loss:.4f}")
-        logging.info(f"  {method_display} MMF: {mmf_acc}")
-        logging.info(f"  Label Shift  Accuracy: {label_shift_acc:.2f}% ")
-        logging.info(f"  Label Shift  MMF: {mmf_acc_pc}")
-        logging.info("")
+        # 记录日志
+        logging.info(f"Epoch {epoch} {set_name} Results - {method_display}")
+        logging.info(f"  {set_name} Accuracy: {100 * accuracy:.2f}%, Loss: {test_loss:.4f}")
+        logging.info(f"  {set_name} MMF: {mmf_acc}")
+        logging.info(f"  Label Shift Accuracy: {label_shift_acc:.2f}%")
+        logging.info(f"  Label Shift MMF: {mmf_acc_pc}")
         
         # 更新最佳准确率
         if accuracy > self.best_accuracy:
             self.best_accuracy = accuracy
-            print(f" New best {method_display} accuracy: {100 * accuracy:.2f}%\n")
-            logging.info(f"New best {method_display} accuracy: {100 * accuracy:.2f}%")
-    
+            print(f" New best {set_name} {method_display} accuracy: {100 * accuracy:.2f}%\n")
+            logging.info(f"New best {set_name} accuracy: {100 * accuracy:.2f}%")
 
     
     def get_accuracy_history(self) -> List[Dict]:

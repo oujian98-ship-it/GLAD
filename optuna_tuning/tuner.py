@@ -72,8 +72,8 @@ def get_base_args(args):
     base.stage3_mode = 'hybrid'
     base.beta_cons = 0.1
     base.gamma_pseudo = 0.7
-    base.stage1_end_epoch = 70
-    base.stage2_end_epoch = 125
+    base.stage1_end_epoch = args.stage1_end_epoch
+    base.stage2_end_epoch = args.stage2_end_epoch
     
     # 其他配置
     base.use_wcdas = False
@@ -83,6 +83,20 @@ def get_base_args(args):
     base.target_radius = 1.0
     base.enable_stage3_calibration = True
     base.stage3_calibration_strength = 0.5
+    
+    # 缺失的基础参数 (防止 TrainingConfig 报错)
+    base.lambda_sem = 0.01
+    base.gamma_ge = 0.1
+    base.max_L_semantic = 20.0
+    base.max_L_ge = 50.0
+    base.feature_clamp_max = 10.0
+    base.radius_slack = 0.5
+    base.ema_warmup_epochs = 10
+    base.margin_top_k = 3
+    base.enable_lora = True
+    base.lora_rank = 4
+    base.lora_alpha = 8.0
+    base.weight_decay = 2e-3
     
     return base
 
@@ -388,8 +402,8 @@ def main():
     parser.add_argument('--config', default="./config/cifar10/cifar10_LSC_Mixup.txt", help='配置文件路径')
     parser.add_argument('--dataset', default="CIFAR10", type=str, help='数据集名称')
     parser.add_argument('--imb_factor', default=0.01, type=float, help='不平衡因子')
-    parser.add_argument('--model_fixed', default='./pretrained_models/resnet32_cifar10_lt001.checkpoint', 
-                        type=str, help='预训练模型路径')
+    parser.add_argument('--model_fixed', default=None, 
+                        type=str, help='预训练模型路径 (如果为 None 则自动选择)')
     
     # 训练参数
     parser.add_argument('--epoch', default=500, type=int, help='总训练轮数')
@@ -398,7 +412,29 @@ def main():
     parser.add_argument('--generation_interval', default=10, type=int, help='生成间隔')
     parser.add_argument('--warmup_epochs', default=30, type=int, help='预热轮数')
     
+    # 阶段结束轮数 (默认与 main.py 保持一致)
+    parser.add_argument('--stage1_end_epoch', default=200, type=int, help='Stage 1 结束轮数')
+    parser.add_argument('--stage2_end_epoch', default=250, type=int, help='Stage 2 结束轮数')
+    
     args = parser.parse_args()
+    
+    # Auto-select model_fixed if not provided
+    if args.model_fixed is None:
+        if args.dataset == "CIFAR10":
+            if args.imb_factor == 0.01:
+                args.model_fixed = './pretrained_models/resnet32_cifar10_lt001.checkpoint'
+            elif args.imb_factor == 0.1:
+                args.model_fixed = './pretrained_models/resnet32_cifar10_lt01.checkpoint'
+        elif args.dataset == "CIFAR100":
+            if args.imb_factor == 0.01:
+                args.model_fixed = './pretrained_models/resnet32_cifar100_lt001.checkpoint'
+            elif args.imb_factor == 0.1:
+                args.model_fixed = './pretrained_models/resnet32_cifar100_lt01.checkpoint'
+        elif args.dataset == "ImageNet":
+            args.model_fixed = './pretrained_models/imagenetlt-resnet10.checkpoint'
+            
+        if args.model_fixed:
+            print(f">>> [Auto-Select] Selected model_fixed: {args.model_fixed}")
     
     # 创建基础参数
     base_args = get_base_args(args)

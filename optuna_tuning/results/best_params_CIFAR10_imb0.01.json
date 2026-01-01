@@ -1,0 +1,23 @@
+{
+  "dataset": "CIFAR10",
+  "imb_factor": 0.01,
+  "best_value": 0.0,
+  "best_params": {
+    "margin_m": 2.5,
+    "lambda_cal": 0.7,
+    "eta_m": 0.4,
+    "eta_p": 0.2,
+    "eta_r": 0.15000000000000002,
+    "beta_cons": 0.05,
+    "gamma_pseudo": 0.3,
+    "stage1_end_epoch": 100,
+    "stage2_end_epoch": 175,
+    "radius_slack": 0.8,
+    "ema_warmup_epochs": 3,
+    "margin_top_k": 5,
+    "lora_rank": 8
+  },
+  "best_trial_number": 0,
+  "n_trials": 1,
+  "timestamp": "2025-12-30T19:49:53.188392"
+}

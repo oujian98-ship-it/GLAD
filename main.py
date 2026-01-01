@@ -27,11 +27,12 @@ parser = argparse.ArgumentParser(description='Long-Tailed Diffusion Model traini
 parser.add_argument('--datapath', default="./data", type=str, help='dataset path')
 parser.add_argument('--config', default="./config/cifar10/cifar10_LSC_Mixup.txt", help='path to config file')
 
-parser.add_argument('--epoch', default=400, type=int, help='epoch number to train')
-parser.add_argument('--dataset', default="CIFAR100", type=str, help='dataset name it may be CIFAR10, CIFAR100 or ImageNet')
-parser.add_argument('--imb_factor', default=0.1, type=float, help='long-tailed imbalance factor')
+
+parser.add_argument('--dataset', default="CIFAR10", type=str, help='dataset name it may be CIFAR10, CIFAR100 or ImageNet')
+parser.add_argument('--imb_factor', default=0.01, type=float, help='long-tailed imbalance factor')
 parser.add_argument('--diffusion_epoch', default=201, type=int, help='diffusion epoch to train')
-parser.add_argument('--model_fixed', default='./pretrained_models/resnet32_cifar100_lt001.checkpoint', type=str, help='the encoder model path')
+#parser.add_argument('--model_fixed', default='./pretrained_models/resnet32_cifar10_lt001.checkpoint', type=str, help='the encoder model path')
+parser.add_argument('--model_fixed', default=None, type=str, help='the encoder model path (autodetected if None)')
 parser.add_argument('--feature_ratio', default=0.20, type=float, help='The ratio of generating feature')
 parser.add_argument('--diffusion_step', default=1000, type=int, help='The steps of diffusion')
 parser.add_argument('--checkpoint', default=None, type=str, help='model path to resume previous training, default None')
@@ -45,14 +46,15 @@ parser.add_argument('--training_strategy', default='gald_dc', type=str, choices=
                     help='Training strategy to use: original or gald_dc')
 
 # GALD
-parser.add_argument('--lr', default=0.002, type=float, help='learning rate')
+parser.add_argument('--epoch', default=400, type=int, help='epoch number to train')
+parser.add_argument('--lr', default=0.003, type=float, help='learning rate')
 parser.add_argument('--lambda_ema', default=0.2, type=float, help='EMA decay rate for class prototypes (β_proto)')
 parser.add_argument('--beta_radius', default=0.1, type=float, help='EMA decay rate for class radii (β_radius)')
-parser.add_argument('--eta_p', default=0.15, type=float, help='weight for prototype loss')
-parser.add_argument('--eta_r', default=0.1, type=float, help='weight for radius constraint loss (previously covariance loss)')
 parser.add_argument('--lambda_sem', default=0.01, type=float, help='weight for semantic loss')
 parser.add_argument('--gamma_ge', default=0.15, type=float, help='weight for generation loss')
-parser.add_argument('--warmup_epochs', default=30, type=int, help='warmup epochs for semantic loss')
+parser.add_argument('--eta_p', default=0.05, type=float, help='weight for prototype loss')
+parser.add_argument('--eta_r', default=0.1, type=float, help='weight for radius constraint loss (previously covariance loss)')
+
 parser.add_argument('--generation_interval', default=5, type=int, help='generation interval for fake features')
 parser.add_argument('--ddim_steps', default=100, type=int, help='DDIM sampling steps')
 
@@ -91,9 +93,31 @@ parser.add_argument('--stage3_calibration_strength', default=0.5, type=float, he
 def main():
     
     args = parser.parse_args()
+    
+    # Auto-select model_fixed if not provided
+    if args.model_fixed is None:
+        if args.dataset == "CIFAR10":
+            if args.imb_factor == 0.01:
+                args.model_fixed = './pretrained_models/resnet32_cifar10_lt001.checkpoint'
+            elif args.imb_factor == 0.1:
+                args.model_fixed = './pretrained_models/resnet32_cifar10_lt01.checkpoint'
+        elif args.dataset == "CIFAR100":
+            if args.imb_factor == 0.01:
+                args.model_fixed = './pretrained_models/resnet32_cifar100_lt001.checkpoint'
+            elif args.imb_factor == 0.1:
+                args.model_fixed = './pretrained_models/resnet32_cifar100_lt01.checkpoint'
+        elif args.dataset == "ImageNet":
+            args.model_fixed = './pretrained_models/imagenetlt-resnet10.checkpoint'
+            
+        if args.model_fixed:
+            print(f">>> [Auto-Select] Selected model_fixed: {args.model_fixed}")
+        else:
+            print(f">>> [Warning] No model_fixed found for dataset={args.dataset}, imb_factor={args.imb_factor}")
+
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
-    logs_dir = "./logs"
+    logs_dir = os.path.join("./logs", f"{args.dataset}_{args.imb_factor}")
+    os.makedirs(logs_dir, exist_ok=True)
     log_filename = os.path.join(logs_dir, f"{args.dataset}_{args.imb_factor}_{current_time}.log")
     logging.basicConfig(filename=log_filename, level=logging.INFO)
     
@@ -107,7 +131,7 @@ def main():
     if args.dataset == "CIFAR10" or args.dataset == "CIFAR100":
         # customized dataset
         dataset_info = Custom_dataset(args)
-        train_set, _, test_set, dset_info = data_loader_wrapper_cust(dataset_info)
+        train_set, val_set, test_set, dset_info = data_loader_wrapper_cust(dataset_info)
     elif args.dataset == "ImageNet":
         dataset_info = Custom_dataset_ImageNet(args)
         train_set, val_set, test_set, dset_info = data_loader_wrapper(cfg.dataset)

@@ -58,16 +58,12 @@ class OptunaStrategyATrainer(GALDDCTrainer):
         from datetime import datetime
         
         # 创建日志目录
-        logs_dir = "./logs"
+        logs_dir = os.path.join("./logs", f"{self.config.dataset}_{self.config.imb_factor}")
         os.makedirs(logs_dir, exist_ok=True)
         
-        # 生成日志文件名 (包含 trial 编号)
+        # 生成日志文件名
         current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        trial_id = self.trial.number if self.trial else 0
-        log_filename = os.path.join(
-            logs_dir, 
-            f"optuna_trial{trial_id}_{self.config.dataset}_{self.config.imb_factor}_{current_time}.log"
-        )
+        log_filename = os.path.join(logs_dir, f"{self.config.dataset}_{self.config.imb_factor}_{current_time}.log")
         
         # 配置日志 (每个 trial 独立的日志文件)
         # 移除之前的 handlers 避免重复
@@ -81,8 +77,8 @@ class OptunaStrategyATrainer(GALDDCTrainer):
             format='%(asctime)s - %(levelname)s - %(message)s'
         )
         
-        print(f"\n[Optuna Trial {trial_id}] 日志保存到: {log_filename}")
-        logging.info(f"[Optuna Trial {trial_id}] 开始训练")
+        print(f"\n日志保存到: {log_filename}")
+        logging.info(f"开始训练")
         
         # 打印并记录配置
         self.config.log_config()
@@ -92,7 +88,7 @@ class OptunaStrategyATrainer(GALDDCTrainer):
         import copy
         
         cfg, finish = config_setup(self.config.config, None, self.config.datapath, update=False)
-        train_set, test_set, num_classes, dataset_info = self._load_data(cfg)
+        train_set, val_set, test_set, num_classes, dataset_info = self._load_data(cfg)
         
         # 获取训练集类别统计量
         if 'per_class_img_num' in dataset_info:
@@ -111,13 +107,13 @@ class OptunaStrategyATrainer(GALDDCTrainer):
             encoder, classifier, diffusion_model, feature_dim = \
                 self.model_manager.initialize_models(num_classes, dataset_info)
         
-        # 初始化优化器
+        # 初始化优化器 (同步为 SGD)
         from torch import optim
-        optimizer = optim.Adam([
+        optimizer = optim.SGD([
             {'params': encoder.parameters(), 'lr': self.config.lr * 0.01},
             {'params': classifier.parameters(), 'lr': self.config.lr},
             {'params': diffusion_model.parameters(), 'lr': self.config.lr}
-        ], weight_decay=self.config.weight_decay)
+        ], momentum=0.9, nesterov=True, weight_decay=self.config.weight_decay)
         
         self.optimizer = optimizer
         self.scheduler = None
@@ -127,9 +123,9 @@ class OptunaStrategyATrainer(GALDDCTrainer):
         
         # 初始化几何统计量
         with torch.no_grad():
-            class_prototypes = self._initialize_class_prototypes(num_classes, feature_dim)
-            class_prototypes = self._compute_true_class_prototypes(encoder, train_set, class_prototypes, num_classes, feature_dim)
-            target_radii = self._compute_target_radii_from_real_features(encoder, train_set, class_prototypes, num_classes)
+            class_mu = self._initialize_class_mu(num_classes, feature_dim)
+            class_mu = self._compute_true_class_mu(encoder, train_set, class_mu, num_classes, feature_dim)
+            r_obs = self._compute_r_obs_from_real_features(encoder, train_set, class_mu, num_classes)
         
         # GALD-DC 初始化
         if self.config.tau == -1:
@@ -138,14 +134,14 @@ class OptunaStrategyATrainer(GALDDCTrainer):
             tau = self.config.tau
         
         self.tau = tau
-        r_prior = self.loss_calculator.compute_head_class_prior(target_radii, train_class_counts, tau)
+        r_prior = self.loss_calculator.compute_head_class_prior(r_obs, train_class_counts, tau)
         self.r_prior = r_prior
         self.class_counts = train_class_counts
         
-        print(f"\n[Optuna Trial {trial_id}] 开始训练...")
+        print(f"\n开始训练...")
         print(f"  lr={self.config.lr:.6f}, margin_m={self.config.margin_m:.2f}")
         print(f"  lambda_cal={self.config.lambda_cal:.2f}, eta_m={self.config.eta_m:.2f}")
-        logging.info(f"[Optuna Trial {trial_id}] 超参数: lr={self.config.lr:.6f}, margin_m={self.config.margin_m:.2f}, lambda_cal={self.config.lambda_cal:.2f}, eta_m={self.config.eta_m:.2f}")
+        logging.info(f"超参数: lr={self.config.lr:.6f}, margin_m={self.config.margin_m:.2f}, lambda_cal={self.config.lambda_cal:.2f}, eta_m={self.config.eta_m:.2f}")
         
         # 训练循环
         for epoch in range(self.config.epochs):
@@ -155,12 +151,12 @@ class OptunaStrategyATrainer(GALDDCTrainer):
             # Stage 1 结束时的处理
             if epoch == self.config.stage1_end_epoch:
                 with torch.no_grad():
-                    class_prototypes = self._compute_true_class_prototypes(
-                        encoder, train_set, class_prototypes, num_classes, feature_dim)
-                    target_radii = self._compute_target_radii_from_real_features(
-                        encoder, train_set, class_prototypes, num_classes)
+                    class_mu = self._compute_true_class_mu(
+                        encoder, train_set, class_mu, num_classes, feature_dim)
+                    r_obs = self._compute_r_obs_from_real_features(
+                        encoder, train_set, class_mu, num_classes)
                     r_prior = self.loss_calculator.compute_head_class_prior(
-                        target_radii, train_class_counts, self.tau)
+                        r_obs, train_class_counts, self.tau)
                     self.r_prior = r_prior
                     
                     # 保存冻结编码器副本
@@ -169,20 +165,44 @@ class OptunaStrategyATrainer(GALDDCTrainer):
                     for param in self.frozen_encoder.parameters():
                         param.requires_grad = False
             
+            # Stage 2 结束时的处理 - LoRA 注入
+            if epoch == self.config.stage2_end_epoch - 1:
+                if getattr(self.config, 'enable_lora', True):
+                    from gald_dc.lora_adapter import apply_lora_to_diffusion_model
+                    self.lora_adapter, self.lora_params = apply_lora_to_diffusion_model(
+                        diffusion_model,
+                        rank=getattr(self.config, 'lora_rank', 4),
+                        alpha=getattr(self.config, 'lora_alpha', 8.0)
+                    )
+                    if self.lora_params:
+                        optimizer.add_param_group({
+                            'params': self.lora_params,
+                            'lr': self.config.lr 
+                        })
+
             # 训练一个 epoch
-            self._train_epoch(epoch, encoder, classifier, diffusion_model, optimizer,
-                             train_set, class_prototypes, target_radii,
+            train_loss, train_accuracy = self._train_epoch(epoch, encoder, classifier, diffusion_model, optimizer,
+                             train_set, class_mu, r_obs,
                              sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod,
                              num_classes, feature_dim, loss_weights, train_class_counts,
                              r_prior)
             
             # Stage 3: 验证并上报结果
             if stage == 3:
-                test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc = \
+                # 1. 验证集评估
+                v_loss, v_acc, v_ls_acc, v_mmf, v_mmf_ls = \
+                    self._validate(encoder, classifier, val_set, dataset_info, train_class_counts)
+                
+                # 2. 测试集评估
+                t_loss, t_acc, t_ls_acc, t_mmf, t_mmf_ls = \
                     self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
                 
-                # 记录到日志 (与原项目 monitor.log_validation 格式一致)
-                self.monitor.log_validation(epoch, accuracy, test_loss, label_shift_acc, mmf_acc, mmf_acc_pc)
+                # 3. 分别输出 Val 和 Test (满足用户对原始样式的喜好)
+                self.monitor.log_validation(epoch, v_acc, v_loss, v_ls_acc, v_mmf, v_mmf_ls, mode='Val')
+                self.monitor.log_validation(epoch, t_acc, t_loss, t_ls_acc, t_mmf, t_mmf_ls, mode='Test')
+                
+                # 别忘了更新给 Optuna 用的准确率变量
+                accuracy = v_acc 
                 
                 # 更新最佳准确率
                 if accuracy > self.best_accuracy:
@@ -206,14 +226,20 @@ class OptunaStrategyATrainer(GALDDCTrainer):
                             raise optuna.TrialPruned()
                 
                 # 简化的进度日志
-                if epoch % 10 == 0:
+                if (epoch - self.config.stage2_end_epoch) % 10 == 0:
                     print(f"  Epoch {epoch}: Acc={100*accuracy:.2f}%, Best={100*self.best_accuracy:.2f}%")
         
         # 训练完成，记录最终结果
         import logging
-        logging.info(f"[Optuna Trial] 训练完成! Best Accuracy: {100*self.best_accuracy:.2f}%")
-        logging.info(f"[Optuna Trial] Best Label Shift Accuracy: {getattr(self, 'best_label_shift_acc', 0):.2f}%")
-        print(f"\n[Optuna Trial] 训练完成! Best Accuracy: {100*self.best_accuracy:.2f}%")
+        logging.info(f"训练完成! Best Accuracy: {100*self.best_accuracy:.2f}%")
+        logging.info(f"Best Label Shift Accuracy: {getattr(self, 'best_label_shift_acc', 0):.2f}%")
+        print(f"\n训练完成! Best Accuracy: {100*self.best_accuracy:.2f}%")
+        # 训练结束，在测试集上进行最终评估
+        print(f"\n{'='*20} Final Evaluation on Test Set {'='*20}")
+        test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc = \
+            self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
+        self.monitor.log_validation(self.config.epochs, accuracy, test_loss, label_shift_acc, mmf_acc, mmf_acc_pc, mode='Test')
+        
         return self.best_accuracy
 
 

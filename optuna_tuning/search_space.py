@@ -32,7 +32,7 @@ SEARCH_SPACE_CONFIG = {
     'eta_m': {
         'type': 'float',
         'low': 0.05,
-        'high': 0.5,
+        'high': 0.3,
         'step': 0.05,
         'description': '边距损失权重'
     },
@@ -50,7 +50,7 @@ SEARCH_SPACE_CONFIG = {
     'eta_r': {
         'type': 'float',
         'low': 0.1,
-        'high': 0.5,
+        'high': 0.3,
         'step': 0.05,
         'description': '半径约束损失权重'
     },
@@ -68,27 +68,26 @@ SEARCH_SPACE_CONFIG = {
     'gamma_pseudo': {
         'type': 'float',
         'low': 0.3,
-        'high': 1.0,
+        'high': 0.7,
         'step': 0.1,
         'description': '伪特征分类损失权重'
     },
     
-    # Stage 1 结束轮数
-    'stage1_end_epoch': {
-        'type': 'int',
-        'low': 50,
-        'high': 100,
-        'step': 10,
-        'description': 'Stage 1 (CE预训练) 结束轮数'
+    # EMA 更新率参数
+    'lambda_ema': {
+        'type': 'float',
+        'low': 0.05,
+        'high': 0.3,
+        'step': 0.05,
+        'description': '类别原型 EMA 更新率'
     },
     
-    # Stage 2 结束轮数
-    'stage2_end_epoch': {
-        'type': 'int',
-        'low': 100,
-        'high': 200,
-        'step': 25,
-        'description': 'Stage 2 (Diffusion训练) 结束轮数'
+    'beta_radius': {
+        'type': 'float',
+        'low': 0.05,
+        'high': 0.4,
+        'step': 0.05,
+        'description': '类别半径 EMA 更新率'
     },
     
     # ==================== R2/R3/R4/R6 修复参数 ====================

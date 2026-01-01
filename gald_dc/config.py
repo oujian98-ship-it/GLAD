@@ -25,7 +25,7 @@ class TrainingConfig:
         self.eta_r = args.eta_r               # 现用于等半径约束
         self.lambda_sem = args.lambda_sem      
         self.gamma_ge = args.gamma_ge         
-        self.warmup_epochs = args.warmup_epochs  
+        #self.warmup_epochs = args.warmup_epochs  
         self.generation_interval = args.generation_interval  
         self.ddim_steps = args.ddim_steps
         

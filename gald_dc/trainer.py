@@ -46,7 +46,7 @@ class GALDDCTrainer:
     def train(self):
         # 1. 加载数据
         cfg, finish = config_setup(self.config.config, None, self.config.datapath, update=False)
-        train_set, test_set, num_classes, dataset_info = self._load_data(cfg)
+        train_set, val_set, test_set, num_classes, dataset_info = self._load_data(cfg)
         
         # [关键修复 3] 获取正确的训练集类别统计量 (Training Priors)
         # WCDAS 验证时必须使用训练集的分布，而不是测试集或均匀分布
@@ -167,26 +167,30 @@ class GALDDCTrainer:
                 print(f"\n>>> [Stage {stage}] Started - Epoch {epoch}")
             
             # 训练一个 Epoch
-            self._train_epoch(epoch, encoder, classifier, diffusion_model, optimizer,
+            train_loss, train_accuracy = self._train_epoch(epoch, encoder, classifier, diffusion_model, optimizer,
                             train_set, class_mu, r_obs,
                             sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod,
                             num_classes, feature_dim, loss_weights, train_class_counts,
                             r_prior)
             
-            # 只在 Stage 3 计算准确率
+            # 只在 Stage 3 计算准确率并展示“三连报”
             if stage == 3:
-                test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc = \
+                # 1. 验证集评估
+                v_loss, v_acc, v_ls_acc, v_mmf, v_mmf_ls = \
+                    self._validate(encoder, classifier, val_set, dataset_info, train_class_counts)
+                
+                # 2. 测试集评估
+                t_loss, t_acc, t_ls_acc, t_mmf, t_mmf_ls = \
                     self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
                 
-                self.monitor.log_validation(epoch, accuracy, test_loss, label_shift_acc, mmf_acc, mmf_acc_pc)
+                # 3. 分别输出 Val 和 Test (满足用户对原始样式的喜好)
+                self.monitor.log_validation(epoch, v_acc, v_loss, v_ls_acc, v_mmf, v_mmf_ls, mode='Val')
+                self.monitor.log_validation(epoch, t_acc, t_loss, t_ls_acc, t_mmf, t_mmf_ls, mode='Test')
                 
-                # 保存最佳模型
-                if accuracy > self.monitor.best_accuracy:
-                    self._save_checkpoint(epoch, encoder, classifier, diffusion_model, optimizer, accuracy, 'ce')
-                
-                if label_shift_acc > self.monitor.best_label_shift_acc:
-                    self.monitor.best_label_shift_acc = label_shift_acc
-                    self._save_checkpoint(epoch, encoder, classifier, diffusion_model, optimizer, label_shift_acc, 'pc')
+                # 保存最佳模型 (基于验证集 LSC Acc)
+                if v_ls_acc > self.monitor.best_label_shift_acc:
+                    self.monitor.best_label_shift_acc = v_ls_acc
+                    self._save_checkpoint(epoch, encoder, classifier, diffusion_model, optimizer, v_ls_acc, 'pc')
             
             # 在 Stage 2 结束时保存扩散模型并注入 LoRA
             if epoch == self.config.stage2_end_epoch - 1:
@@ -210,7 +214,12 @@ class GALDDCTrainer:
                         })
                         print(f"[R6 LoRA] LoRA parameters added to optimizer")
         
-        # 训练结束
+        # 训练结束，在测试集上进行最终评估
+        print(f"\n{'='*20} Final Evaluation on Test Set {'='*20}")
+        test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc = \
+            self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
+        self.monitor.log_validation(self.config.epochs, accuracy, test_loss, label_shift_acc, mmf_acc, mmf_acc_pc, mode='Test')
+        
         self.encoder = encoder
         self.classifier = classifier
         self.diffusion_model = diffusion_model
@@ -344,6 +353,7 @@ class GALDDCTrainer:
         
         avg_losses = {key: value / len(train_set) for key, value in running_losses.items()}
         self.monitor.log_epoch_summary(epoch, avg_losses, train_accuracy, train_loss, stage)
+        return train_loss, train_accuracy
     
     def _compute_batch_losses(self, encoder, classifier, diffusion_model, 
                              real_features: torch.Tensor, inputs: torch.Tensor, 
@@ -832,11 +842,11 @@ class GALDDCTrainer:
 
     # --- 辅助函数 ---
 
-    def _load_data(self, cfg) -> Tuple[DataLoader, DataLoader, int, Dict]:
+    def _load_data(self, cfg) -> Tuple[DataLoader, DataLoader, DataLoader, int, Dict]:
         # 保持原有逻辑
         if self.config.dataset == "CIFAR10" or self.config.dataset == "CIFAR100":
             dataset_info = Custom_dataset(self.config)
-            train_set, _, test_set, dset_info = data_loader_wrapper_cust(dataset_info)
+            train_set, val_set, test_set, dset_info = data_loader_wrapper_cust(dataset_info)
         elif self.config.dataset == "ImageNet":
             dataset_info = Custom_dataset_ImageNet(self.config)
             train_set, val_set, test_set, dset_info = data_loader_wrapper(cfg.dataset)
@@ -848,7 +858,8 @@ class GALDDCTrainer:
             "dataset_name": self.config.dataset,
             "per_class_img_num": dset_info["per_class_img_num"]
         }
-        return train_set, test_set, num_classes, dataset_info
+        
+        return train_set, val_set, test_set, num_classes, dataset_info
     
     def _get_dynamic_loss_weights(self, epoch: int) -> Dict[str, float]:
         return {'lambda_sem': self.config.lambda_sem, 'gamma_ge': self.config.gamma_ge}
