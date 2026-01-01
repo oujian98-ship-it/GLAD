@@ -48,9 +48,9 @@ class GALDDCTrainer:
         cfg, finish = config_setup(self.config.config, None, self.config.datapath, update=False)
         train_set, val_set, test_set, num_classes, dataset_info = self._load_data(cfg)
     
-    # 统计 Stage 3 的平均准确率
-    stage3_accs = []
-    stage3_ls_accs = []
+        # 统计 Stage 3 的平均准确率
+        stage3_accs = []
+        stage3_ls_accs = []
         
         # [关键修复 3] 获取正确的训练集类别统计量 (Training Priors)
         # WCDAS 验证时必须使用训练集的分布，而不是测试集或均匀分布
@@ -639,6 +639,7 @@ class GALDDCTrainer:
         # Label Shift (仅在 CE 模式下作为参考，WCDAS 自带 Shift 修正)
         pc_probs = LSC(probs, cls_num_list=dataset_info['per_class_img_num'])
         label_shift_acc, mmf_acc_pc = self._get_metrics(pc_probs, labels, dataset_info['per_class_img_num'])
+        label_shift_acc /= 100.0  # 转换为比例 (0-1)
         
         return test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc
 

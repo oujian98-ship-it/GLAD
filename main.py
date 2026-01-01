@@ -52,7 +52,7 @@ parser.add_argument('--lambda_ema', default=0.2, type=float, help='EMA decay rat
 parser.add_argument('--beta_radius', default=0.1, type=float, help='EMA decay rate for class radii (β_radius)')
 parser.add_argument('--lambda_sem', default=0.01, type=float, help='weight for semantic loss')
 parser.add_argument('--gamma_ge', default=0.15, type=float, help='weight for generation loss')
-parser.add_argument('--eta_p', default=0.05, type=float, help='weight for prototype loss')
+parser.add_argument('--eta_p', default=0.01, type=float, help='weight for prototype loss')
 parser.add_argument('--eta_r', default=0.1, type=float, help='weight for radius constraint loss (previously covariance loss)')
 
 parser.add_argument('--generation_interval', default=5, type=int, help='generation interval for fake features')
