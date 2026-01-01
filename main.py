@@ -28,7 +28,7 @@ parser.add_argument('--datapath', default="./data", type=str, help='dataset path
 parser.add_argument('--config', default="./config/cifar10/cifar10_LSC_Mixup.txt", help='path to config file')
 
 
-parser.add_argument('--dataset', default="CIFAR10", type=str, help='dataset name it may be CIFAR10, CIFAR100 or ImageNet')
+parser.add_argument('--dataset', default="CIFAR100", type=str, help='dataset name it may be CIFAR10, CIFAR100 or ImageNet')
 parser.add_argument('--imb_factor', default=0.01, type=float, help='long-tailed imbalance factor')
 parser.add_argument('--diffusion_epoch', default=201, type=int, help='diffusion epoch to train')
 #parser.add_argument('--model_fixed', default='./pretrained_models/resnet32_cifar10_lt001.checkpoint', type=str, help='the encoder model path')
@@ -47,7 +47,7 @@ parser.add_argument('--training_strategy', default='gald_dc', type=str, choices=
 
 # GALD
 parser.add_argument('--epoch', default=400, type=int, help='epoch number to train')
-parser.add_argument('--lr', default=0.003, type=float, help='learning rate')
+parser.add_argument('--lr', default=0.01, type=float, help='learning rate')
 parser.add_argument('--lambda_ema', default=0.2, type=float, help='EMA decay rate for class prototypes (β_proto)')
 parser.add_argument('--beta_radius', default=0.1, type=float, help='EMA decay rate for class radii (β_radius)')
 parser.add_argument('--lambda_sem', default=0.01, type=float, help='weight for semantic loss')

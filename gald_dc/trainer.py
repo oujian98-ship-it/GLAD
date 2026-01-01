@@ -47,6 +47,10 @@ class GALDDCTrainer:
         # 1. 加载数据
         cfg, finish = config_setup(self.config.config, None, self.config.datapath, update=False)
         train_set, val_set, test_set, num_classes, dataset_info = self._load_data(cfg)
+    
+    # 统计 Stage 3 的平均准确率
+    stage3_accs = []
+    stage3_ls_accs = []
         
         # [关键修复 3] 获取正确的训练集类别统计量 (Training Priors)
         # WCDAS 验证时必须使用训练集的分布，而不是测试集或均匀分布
@@ -175,29 +179,23 @@ class GALDDCTrainer:
             
             # 只在 Stage 3 计算准确率并展示“三连报”
             if stage == 3:
-                # 1. 验证集评估
-                v_loss, v_acc, v_ls_acc, v_mmf, v_mmf_ls = \
-                    self._validate(encoder, classifier, val_set, dataset_info, train_class_counts)
-                
-                # 2. 测试集评估
                 t_loss, t_acc, t_ls_acc, t_mmf, t_mmf_ls = \
                     self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
                 
-                # 3. 分别输出 Val 和 Test (满足用户对原始样式的喜好)
-                self.monitor.log_validation(epoch, v_acc, v_loss, v_ls_acc, v_mmf, v_mmf_ls, mode='Val')
                 self.monitor.log_validation(epoch, t_acc, t_loss, t_ls_acc, t_mmf, t_mmf_ls, mode='Test')
                 
-                # 保存最佳模型 (基于验证集 LSC Acc)
-                if v_ls_acc > self.monitor.best_label_shift_acc:
-                    self.monitor.best_label_shift_acc = v_ls_acc
-                    self._save_checkpoint(epoch, encoder, classifier, diffusion_model, optimizer, v_ls_acc, 'pc')
+                if t_ls_acc > self.monitor.best_label_shift_acc:
+                    self.monitor.best_label_shift_acc = t_ls_acc
+                    self._save_checkpoint(epoch, encoder, classifier, diffusion_model, optimizer, t_ls_acc, 'pc')
+                
+                # 记录 Stage 3 准确率用于计算平均值
+                stage3_accs.append(t_acc)
+                stage3_ls_accs.append(t_ls_acc)
             
-            # 在 Stage 2 结束时保存扩散模型并注入 LoRA
             if epoch == self.config.stage2_end_epoch - 1:
                 print(f"\n[Stage 2 Complete] Saving final diffusion model...")
                 self.model_manager.save_diffusion_model_to_pretrained(diffusion_model, epoch)
                 
-                # [R6 修复] 注入 LoRA 到扩散模型，允许 Stage 3 轻量级微调
                 if getattr(self.config, 'enable_lora', True):
                     print(f"\n[R6 LoRA] Injecting LoRA layers into diffusion model...")
                     self.lora_adapter, self.lora_params = apply_lora_to_diffusion_model(
@@ -206,7 +204,6 @@ class GALDDCTrainer:
                         alpha=getattr(self.config, 'lora_alpha', 8.0)
                     )
                     
-                    # 将 LoRA 参数添加到优化器
                     if self.lora_params:
                         optimizer.add_param_group({
                             'params': self.lora_params,
@@ -214,16 +211,16 @@ class GALDDCTrainer:
                         })
                         print(f"[R6 LoRA] LoRA parameters added to optimizer")
         
-        # 训练结束，在测试集上进行最终评估
-        print(f"\n{'='*20} Final Evaluation on Test Set {'='*20}")
-        test_loss, accuracy, label_shift_acc, mmf_acc, mmf_acc_pc = \
-            self._validate(encoder, classifier, test_set, dataset_info, train_class_counts)
-        self.monitor.log_validation(self.config.epochs, accuracy, test_loss, label_shift_acc, mmf_acc, mmf_acc_pc, mode='Test')
         
         self.encoder = encoder
         self.classifier = classifier
         self.diffusion_model = diffusion_model
-        self._save_accuracy_history()
+        
+        # 计算 Stage 3 平均准确率
+        avg_acc = sum(stage3_accs) / len(stage3_accs) if stage3_accs else None
+        avg_ls_acc = sum(stage3_ls_accs) / len(stage3_ls_accs) if stage3_ls_accs else None
+        
+        self._save_accuracy_history(avg_acc, avg_ls_acc)
     
     def _get_training_stage(self, epoch: int) -> int:
         """返回当前训练阶段: 1, 2, 3"""
@@ -248,8 +245,6 @@ class GALDDCTrainer:
         stage = self._get_training_stage(epoch)
         #训练 Encoder + Classifier，获取头部类半径先验
         if stage == 1:
-            # Stage 1: 只训练 Encoder + Classifier (CE 预训练)
-            # 注意: 禁用 Dropout 以加速收敛，Dropout 只在 Stage 3 使用
             encoder.train()
             classifier.train()
             diffusion_model.eval()
@@ -269,7 +264,6 @@ class GALDDCTrainer:
         else:  # stage == 3
             # Stage 3: 受控微调 (根据模式)
             if self.config.stage3_mode == 'hybrid':
-                # Stage 3-H: 解冻 Encoder，训练 Encoder + Classifier，冻结 Diffusion
                 encoder.train()
                 classifier.train()
                 diffusion_model.eval()
@@ -277,7 +271,6 @@ class GALDDCTrainer:
                 for param in classifier.parameters(): param.requires_grad = True
                 for param in diffusion_model.parameters(): param.requires_grad = False
             else:
-                # Stage 3-S: 冻结 Encoder 和 Diffusion，仅训练 Classifier
                 encoder.eval()
                 classifier.train()
                 diffusion_model.eval()
@@ -285,7 +278,6 @@ class GALDDCTrainer:
                 for param in classifier.parameters(): param.requires_grad = True
                 for param in diffusion_model.parameters(): param.requires_grad = False
         
-        # 添加损失跟踪 (包含 Stage 2 详细损失)
         running_losses = {
             'real': 0.0, 'diffusion': 0.0, 'prototype': 0.0, 'radius': 0.0,
             'margin': 0.0, 'semantic': 0.0, 'gen': 0.0, 'consistency': 0.0, 'total': 0.0
@@ -302,11 +294,9 @@ class GALDDCTrainer:
                 with torch.no_grad():
                     frozen_features = self.frozen_encoder.forward_no_fc(inputs)
             elif stage == 1:
-                # Stage 1: Encoder 需要梯度
                 real_features = encoder.forward_no_fc(inputs)
                 frozen_features = None
             else:
-                # Stage 2 和 Stage 3-S: Encoder 冻结
                 with torch.no_grad():
                     real_features = encoder.forward_no_fc(inputs)
                 frozen_features = None
@@ -1058,7 +1048,7 @@ class GALDDCTrainer:
         
         return correct / total if total > 0 else 0.0
 
-    def _save_accuracy_history(self):
+    def _save_accuracy_history(self, avg_stage3_acc: float = None, avg_stage3_ls_acc: float = None):
         """
         保存准确率历史记录
         """
@@ -1067,4 +1057,4 @@ class GALDDCTrainer:
             self.monitor.save_best_checkpoints(self.encoder, self.classifier, self.diffusion_model, self.model_manager)
         
         # 输出最佳模型准确率信息
-        self.monitor.log_training_complete()
+        self.monitor.log_training_complete(avg_stage3_acc, avg_stage3_ls_acc)

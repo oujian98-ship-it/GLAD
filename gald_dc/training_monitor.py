@@ -182,7 +182,7 @@ class TrainingMonitor:
             model_manager.save_best_models(encoder, classifier, diffusion_model, 
                                          best_accuracy, best_label_shift_acc)
     
-    def log_training_complete(self):
+    def log_training_complete(self, avg_stage3_acc: float = None, avg_stage3_ls_acc: float = None):
         """
         记录训练完成信息，输出最佳模型准确率
         """
@@ -219,9 +219,17 @@ class TrainingMonitor:
             print(f"  MMF Acc:         {best_mmf_acc_pc_best}")
             
             
+            if avg_stage3_acc is not None:
+                print(f"  Avg Test Accuracy:  {100 * avg_stage3_acc:.2f}%")
+                print(f"  Avg Test Label Shift:{100 * avg_stage3_ls_acc:.2f}%")
+        
             # 记录到日志文件
             logging.info(f"Training Complete - Method: {method_display}")
             logging.info(f"  Best {method_display} Accuracy: {100 * best_accuracy:.2f}%")
             logging.info(f"  Best {method_display} MMF: {best_mmf_acc}")
             logging.info(f"  Best Label Shift  Accuracy: {best_label_shift_only:.2f}%")
             logging.info(f"  Best Label Shift  MMF: {best_mmf_acc_pc_best}")
+
+            if avg_stage3_acc is not None:
+                logging.info(f"  Average Test Accuracy: {100 * avg_stage3_acc:.2f}%")
+                logging.info(f"  Average Test Label Shift Accuracy: {100 * avg_stage3_ls_acc:.2f}%")
